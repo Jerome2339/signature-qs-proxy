@@ -10,41 +10,27 @@ const API_KEY = process.env.ANTHROPIC_API_KEY;
 // Multer stores files in memory as Buffer
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB max
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
 
-// CORS — allow your Netlify domain (update this when you have it)
-const allowedOrigins = [
-  'https://signatureconstructionprojects.co.uk',
-  'https://www.signatureconstructionprojects.co.uk',
-  /\.netlify\.app$/,  // allow all netlify preview URLs
-  'http://localhost:3000',
-  'http://localhost:5500',
-  'http://127.0.0.1:5500',
-];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true); // allow non-browser requests
-    const allowed = allowedOrigins.some(o =>
-      typeof o === 'string' ? o === origin : o.test(origin)
-    );
-    callback(allowed ? null : new Error('Not allowed by CORS'), allowed);
-  },
-}));
-
+// Open CORS to all origins — the API key is kept server-side so this is safe
+app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '1.0.0' });
+  res.json({ status: 'ok', version: '1.1.0' });
 });
 
-// ── DRAWING ANALYSIS ENDPOINT ─────────────────────────────────────────────
-// POST /analyse-drawing
-// Accepts multipart/form-data with one or more 'drawings' files (PDF/PNG/JPG)
-// Returns: JSON extracted dimensions
+// Keep-alive — pings itself every 10 minutes to prevent Render free tier sleeping
+const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+setInterval(() => {
+  fetch(`${PROXY_URL}/health`)
+    .then(() => console.log('Keep-alive ping sent'))
+    .catch(err => console.warn('Keep-alive failed:', err.message));
+}, 10 * 60 * 1000); // every 10 minutes
 
+// ── DRAWING ANALYSIS ENDPOINT ─────────────────────────────────────────────
 app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   if (!API_KEY) {
     return res.status(500).json({ error: 'API key not configured on server' });
@@ -55,7 +41,6 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   }
 
   try {
-    // Build content array — one image block per uploaded file
     const contentParts = [];
 
     for (const file of req.files) {
@@ -74,7 +59,6 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
       });
     }
 
-    // The QS extraction prompt
     contentParts.push({
       type: 'text',
       text: `You are a senior quantity surveyor reviewing architect's drawings for a residential extension.
@@ -117,17 +101,14 @@ Extract ALL of the following from the drawings provided. Return ONLY valid JSON,
 }
 
 Strict rules:
-- ONLY extract dimensions that are explicitly annotated as numbers on the drawings
-- DO NOT estimate or scale from a scale bar — only use annotated text dimensions
+- ONLY extract dimensions explicitly annotated as numbers on the drawings
+- DO NOT estimate or scale from a scale bar
 - Dimensions in mm: divide by 1000 to convert to metres
-- Dimensions in feet/inches: convert to metres (1ft = 0.3048m)
+- Dimensions in feet/inches: convert to metres
 - If a value is not shown, set to null and add to missing array
-- Be conservative — null is better than a wrong number
-- For wall heights: use ceiling height if elevation heights not shown
-- For openings: extract from door/window schedules if present`,
+- Be conservative — null is better than a wrong number`
     });
 
-    // Call Anthropic API
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -158,7 +139,7 @@ Strict rules:
     try {
       parsed = JSON.parse(raw);
     } catch (e) {
-      console.error('JSON parse error. Raw response:', raw.substring(0, 500));
+      console.error('JSON parse error. Raw:', raw.substring(0, 500));
       return res.status(502).json({
         error: 'Could not parse AI response as JSON',
         raw: raw.substring(0, 500),
@@ -173,20 +154,18 @@ Strict rules:
   }
 });
 
-// Normalise MIME types for Anthropic
 function normaliseMediaType(mimetype, filename) {
   const m = mimetype.toLowerCase();
   if (m === 'image/jpeg' || m === 'image/jpg') return 'image/jpeg';
   if (m === 'image/png') return 'image/png';
   if (m === 'image/webp') return 'image/webp';
   if (m === 'application/pdf') return 'application/pdf';
-  // Fallback: check filename extension
   const ext = (filename || '').split('.').pop().toLowerCase();
   const extMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', webp: 'image/webp' };
   return extMap[ext] || null;
 }
 
 app.listen(PORT, () => {
-  console.log(`Signature QS Proxy running on port ${PORT}`);
+  console.log(`Signature QS Proxy v1.1 running on port ${PORT}`);
   if (!API_KEY) console.warn('WARNING: ANTHROPIC_API_KEY not set');
 });
