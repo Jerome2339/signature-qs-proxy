@@ -17,7 +17,7 @@ app.use(express.json({ limit: '20mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '1.2.0' });
+  res.json({ status: 'ok', version: '1.3.0' });
 });
 
 // Keep-alive ping every 10 minutes to prevent Render free tier sleeping
@@ -134,7 +134,7 @@ Strict rules:
         'anthropic-beta': 'pdfs-2024-09-25',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 2000,
         messages: [{ role: 'user', content: contentParts }],
       }),
