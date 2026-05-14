@@ -7,35 +7,32 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Multer stores files in memory as Buffer
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
-// Open CORS to all origins — the API key is kept server-side so this is safe
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '1.1.0' });
+  res.json({ status: 'ok', version: '1.2.0' });
 });
 
-// Keep-alive — pings itself every 10 minutes to prevent Render free tier sleeping
+// Keep-alive ping every 10 minutes to prevent Render free tier sleeping
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => {
   fetch(`${PROXY_URL}/health`)
     .then(() => console.log('Keep-alive ping sent'))
     .catch(err => console.warn('Keep-alive failed:', err.message));
-}, 10 * 60 * 1000); // every 10 minutes
+}, 10 * 60 * 1000);
 
 // ── DRAWING ANALYSIS ENDPOINT ─────────────────────────────────────────────
 app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   if (!API_KEY) {
     return res.status(500).json({ error: 'API key not configured on server' });
   }
-
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No drawing files uploaded' });
   }
@@ -45,18 +42,37 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
 
     for (const file of req.files) {
       const b64 = file.buffer.toString('base64');
-      const mediaType = normaliseMediaType(file.mimetype, file.originalname);
+      const mimetype = file.mimetype.toLowerCase();
+      const ext = (file.originalname || '').split('.').pop().toLowerCase();
+      const isPDF = mimetype === 'application/pdf' || ext === 'pdf';
 
-      if (!mediaType) {
-        return res.status(400).json({
-          error: `Unsupported file type: ${file.mimetype}. Please upload PDF, PNG, JPG or WebP.`
+      if (isPDF) {
+        // PDFs use document type
+        contentParts.push({
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: 'application/pdf',
+            data: b64,
+          },
+        });
+      } else {
+        // Images use image type
+        const imageType = getImageMediaType(mimetype, ext);
+        if (!imageType) {
+          return res.status(400).json({
+            error: `Unsupported file type: ${mimetype}. Please upload PDF, PNG, JPG or WebP.`
+          });
+        }
+        contentParts.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: imageType,
+            data: b64,
+          },
         });
       }
-
-      contentParts.push({
-        type: 'image',
-        source: { type: 'base64', media_type: mediaType, data: b64 },
-      });
     }
 
     contentParts.push({
@@ -115,6 +131,7 @@ Strict rules:
         'Content-Type': 'application/json',
         'x-api-key': API_KEY,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25',
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
@@ -128,7 +145,7 @@ Strict rules:
       console.error('Anthropic API error:', anthropicRes.status, errText);
       return res.status(502).json({
         error: `AI API error: ${anthropicRes.status}`,
-        detail: errText.substring(0, 200),
+        detail: errText.substring(0, 300),
       });
     }
 
@@ -154,18 +171,14 @@ Strict rules:
   }
 });
 
-function normaliseMediaType(mimetype, filename) {
-  const m = mimetype.toLowerCase();
-  if (m === 'image/jpeg' || m === 'image/jpg') return 'image/jpeg';
-  if (m === 'image/png') return 'image/png';
-  if (m === 'image/webp') return 'image/webp';
-  if (m === 'application/pdf') return 'application/pdf';
-  const ext = (filename || '').split('.').pop().toLowerCase();
-  const extMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', webp: 'image/webp' };
-  return extMap[ext] || null;
+function getImageMediaType(mimetype, ext) {
+  if (mimetype === 'image/jpeg' || mimetype === 'image/jpg' || ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (mimetype === 'image/png' || ext === 'png') return 'image/png';
+  if (mimetype === 'image/webp' || ext === 'webp') return 'image/webp';
+  return null;
 }
 
 app.listen(PORT, () => {
-  console.log(`Signature QS Proxy v1.1 running on port ${PORT}`);
+  console.log(`Signature QS Proxy v1.2 running on port ${PORT}`);
   if (!API_KEY) console.warn('WARNING: ANTHROPIC_API_KEY not set');
 });
