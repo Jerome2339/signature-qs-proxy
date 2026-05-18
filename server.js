@@ -12,7 +12,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '4.3.0' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '5.0.0' }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -80,172 +80,94 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         ...fileParts,
         {
           type: 'text',
-          text: `You are a senior UK quantity surveyor extracting data from architect's drawings for a materials calculator.
+          text: `You are a senior UK quantity surveyor reading architect's drawings.
 
-These are professional CAD drawings that will include some or all of: floor plans, elevations, sections, schedules, and substructure plans.
-
-Your job is to read every number and label on every drawing and extract it accurately.
+Your task is to extract ONLY what you can read with HIGH CONFIDENCE from these drawings.
+Do not guess. Do not estimate. If you are not sure, return null.
 
 Return ONLY this JSON. No markdown. No explanation.
 
 {
-  "project_name": "project name from title block",
-  "house_type": "house type name if shown",
-  "client": "client name from title block",
-  "plot_numbers": "plot numbers if shown",
+  "project_name": "exact text from title block project field or null",
+  "house_type": "house type name from title block or null",
+  "client": "client/drawn for name from title block or null",
+  "plot_numbers": "plot numbers shown e.g. Plot 13, 14, 16 or null",
 
   "floor_areas": {
-    "ground_m2": ground floor area as decimal number or null,
-    "first_m2": first floor area as decimal number or null,
-    "second_m2": second floor area as decimal number or null,
-    "total_m2": total floor area as decimal number or null
+    "ground_m2": ground floor area as decimal — READ FROM FLOOR AREA TABLE in title block,
+    "first_m2": first floor area as decimal — READ FROM FLOOR AREA TABLE in title block,
+    "total_m2": total floor area as decimal — READ FROM FLOOR AREA TABLE in title block
   },
-
-  "overall_dimensions": {
-    "length_mm": overall building length as integer mm or null,
-    "width_mm": overall building width as integer mm or null
-  },
-
-  "external_walls": [
-    {
-      "label": "e.g. Front wall / South elevation",
-      "length_mm": annotated length as integer mm,
-      "height_mm": wall height as integer mm or null,
-      "is_external": true
-    }
-  ],
-
-  "internal_walls": [
-    {
-      "label": "e.g. Kitchen/Living partition",
-      "length_mm": annotated length as integer mm,
-      "height_mm": null,
-      "is_external": false
-    }
-  ],
 
   "ceiling_heights": {
-    "ground_floor_mm": ground floor ceiling height mm or null,
-    "first_floor_mm": first floor ceiling height mm or null,
-    "floor_to_floor_mm": FFL to FFL height mm or null
+    "ground_floor_mm": integer mm — read from section drawing FFL to ceiling annotation,
+    "first_floor_mm": integer mm — read from section drawing first floor FFL to ceiling,
+    "floor_to_floor_mm": integer mm — FFL ground to FFL first floor if annotated
   },
 
   "roof": {
-    "type": "pitched/flat/mono-pitch/hipped",
-    "pitch_degrees": pitch angle as number or null,
-    "span_mm": roof span mm or null,
-    "length_mm": roof length mm or null,
-    "ridge_height_mm": ridge height mm or null,
-    "eaves_height_mm": eaves height mm or null,
-    "overhang_mm": eaves overhang mm or null,
-    "construction": "trussed rafter/cut roof/flat/unknown"
+    "type": "pitched or flat — read from section drawing",
+    "construction": "trussed rafter or cut roof — read from notes on section",
+    "pitch_degrees": integer degrees — see note below about where to find this
   },
 
   "wall_construction": {
-    "type": "cavity/solid/timber frame",
-    "outer_leaf": "brick/block/render/stone/timber",
-    "outer_leaf_mm": thickness in mm or null,
-    "cavity_mm": cavity width mm or null,
-    "inner_leaf": "block/stud/unknown",
-    "inner_leaf_mm": thickness in mm or null,
-    "total_thickness_mm": total wall thickness mm or null,
-    "insulation": "description of insulation if noted"
+    "type": "cavity or solid or timber frame",
+    "outer_leaf": "brick or block or render",
+    "outer_leaf_mm": integer mm thickness,
+    "cavity_mm": integer mm,
+    "inner_leaf": "block or stud",
+    "inner_leaf_mm": integer mm thickness
   },
 
   "floor_construction": {
-    "ground": "beam and block/concrete slab/timber/unknown",
-    "upper": "timber joists/concrete/unknown"
+    "ground": "beam and block or concrete slab or timber",
+    "upper": "timber joists or concrete or beam and block"
   },
 
   "doors": [
     {
       "ref": "D01",
-      "location": "room name",
-      "structural_opening_w_mm": width mm,
-      "structural_opening_h_mm": height mm,
-      "leaf_w_mm": leaf width mm or null,
-      "leaf_h_mm": leaf height mm or null,
-      "type": "single/double/bi-fold/french/sliding"
+      "location": "room name from schedule",
+      "structural_w_mm": integer width mm from door schedule,
+      "structural_h_mm": integer height mm from door schedule,
+      "type": "single or bifold or double"
     }
   ],
 
   "windows": [
     {
       "ref": "W01",
-      "location": "room name",
-      "structural_opening_w_mm": width mm,
-      "structural_opening_h_mm": height mm,
-      "type": "standard/bay/rooflight/skylight"
+      "location": "room name from schedule",
+      "structural_w_mm": integer width mm from window schedule,
+      "structural_h_mm": integer height mm from window schedule,
+      "type": "standard or bay or rooflight"
     }
   ],
 
   "rooms": [
-    {
-      "name": "room name",
-      "floor": "ground/first/second",
-      "area_m2": area if annotated or null
-    }
+    { "name": "exact room name as labelled on plan", "floor": "ground or first" }
   ],
 
-  "confidence": {
-    "floor_areas": "high/medium/low — high means you read it from the drawing",
-    "dimensions": "high/medium/low",
-    "openings": "high/medium/low",
-    "construction_spec": "high/medium/low"
-  },
-
-  "missing": ["list anything you could not find"],
-  "notes": ["important observations about the drawings"]
+  "notes": ["any important observations"],
+  "cannot_determine": ["list everything you could not read confidently — be specific"]
 }
 
-CRITICAL RULES:
-1. ALL dimensions must be in millimetres as integers. Floor areas in m² as decimals.
+WHERE TO FIND EACH PIECE OF DATA:
 
-2. FLOOR AREA TABLE: Look in the title block (usually bottom right) for a table labelled FLOOR AREA showing GROUND / FIRST / TOTAL rows with m² values. Read these exactly.
+FLOOR AREA TABLE: Bottom right title block. Has rows labelled GROUND, FIRST, TOTAL with m² values next to them. Read these exactly — they are the most reliable numbers on the drawing.
 
-3. OVERALL BUILDING DIMENSIONS — THIS IS CRITICAL:
-   On UK architectural floor plans, dimensions are shown in parallel chains (strings).
-   The OVERALL building dimension is the SINGLE largest number on each axis — it equals 
-   the sum of ALL the smaller sub-dimensions on that axis.
-   
-   METHOD: For each axis (horizontal and vertical), find ALL the dimension chains.
-   The overall dimension is the OUTERMOST one — positioned furthest from the building.
-   It will be a single number (e.g. 7015 or 9828) shown on its own dimension line 
-   outside all other parallel dimension lines.
-   
-   COMMON MISTAKE TO AVOID: Do NOT use sub-dimensions like 6310 (which is the internal 
-   clear width between walls). The overall dimension INCLUDES the wall thicknesses on both 
-   sides. For example if the internal width is 6310 and walls are 353mm each side, 
-   the overall is 6310 + 353 + 353 = 7016 ≈ 7015mm. Always use the outermost single number.
-   
-   If you cannot confidently identify the outermost overall dimension, look for a dimension 
-   string that appears at the very edge of the drawing, furthest from the building outline.
+CEILING HEIGHTS: Section drawings (Section A-A, Section B-B). Look for vertical dimension annotations with FFL labels. Common format: "2375 FFL TO CEILING FINISH" or "2535 FFL TO US TRUSS CHORD". These are the floor-to-ceiling heights.
 
-4. DOOR AND WINDOW SCHEDULES: Look for tables titled DOOR SCHEDULE and WINDOW SCHEDULE. Read EVERY row including the reference number, location, and structural opening size (width x height in mm).
+ROOF PITCH: On section drawings, look at the bottom corner of the triangular roof shape. Where the sloping rafter line meets the top of the wall, there is a small arc symbol (like a quarter circle) with a degree number next to it — for example "35°". This angle indicator is typically positioned within the insulation hatching at the eaves. NOTE: There is also a "PITCH=41°" annotation on staircase details — this is the staircase gradient NOT the roof. Ignore any pitch near staircase risers/going/tread dimensions.
 
-5. CEILING HEIGHTS: Read from SECTION drawings. Look for annotations showing FFL (Finished Floor Level) to ceiling. Common format: "2375 FFL TO CEILING" or similar.
+WALL CONSTRUCTION: The BRICK/BLOCKWORK LEGEND box on the drawing shows the different blockwork types with hatching patterns. Section drawings show the wall build-up with layer thicknesses.
 
-6. ROOF PITCH — CRITICAL:
-   Look at the SECTION drawings (Section A-A, Section B-B etc).
-   The roof forms a triangle shape. At the bottom left and bottom right corners of this 
-   triangle — where the sloping rafter line meets the horizontal wall plate — there is a 
-   small arc symbol with a number and degree symbol next to it (e.g. "35°").
-   This small arc is the pitch angle indicator. It sits within the insulation hatching 
-   at the eaves junction. The number is typically between 20° and 50°.
-   
-   CRITICAL WARNING: Staircase details show "PITCH = 41°" or similar — this is the 
-   STAIRCASE pitch (gradient of the steps), NOT the roof. Ignore any pitch annotation 
-   that appears near stair treads, risers, going dimensions, or staircase outlines.
-   The ROOF pitch is at the eaves of the roof triangle only.
-   
-   If you see TWO pitch annotations — one near a staircase and one at the roof eaves — 
-   the one at the ROOF EAVES is correct. Use that one.
+DOOR AND WINDOW SCHEDULES: Look for tables titled DOOR SCHEDULE and WINDOW SCHEDULE. Each row has a reference (D01, W01 etc), location, and dimensions. Read every single row.
 
-7. WALL CONSTRUCTION: Read the BRICK/BLOCKWORK LEGEND shown on drawings. Look for outer leaf thickness (usually 102mm brick), cavity width, and inner leaf (usually 100mm block).
+ROOMS: Floor plan drawings show room names in large text inside each room space (DINING, KITCHEN, LIVING, HALL, BED 1 etc). List all of them.
 
-8. NEVER estimate, calculate or guess. Only extract numbers explicitly written on the drawing.
-
-9. NEVER confuse internal sub-dimensions with overall building dimensions. The overall dimension is the single outermost number spanning the full building.`
+IMPORTANT: Do NOT attempt to extract overall building dimensions (length and width) — these will be entered manually by the user. Focus only on the data listed above.`
         }
       ]
     }], 6000);
