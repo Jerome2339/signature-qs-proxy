@@ -1,6 +1,3 @@
-
-Copy
-
 const express = require('express');
 const multer = require('multer');
 const fetch = require('node-fetch');
@@ -525,5 +522,4 @@ app.listen(PORT, () => {
   console.log(`Signature QS Proxy v3.0 running on port ${PORT}`);
   if (!API_KEY) console.warn('WARNING: ANTHROPIC_API_KEY not set');
   if (!RESEND_KEY) console.warn('WARNING: RESEND_API_KEY not set');
-});
- 
+}); 
