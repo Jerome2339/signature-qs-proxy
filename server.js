@@ -12,7 +12,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '4.2.0' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '4.3.0' }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -203,13 +203,43 @@ CRITICAL RULES:
 
 2. FLOOR AREA TABLE: Look in the title block (usually bottom right) for a table labelled FLOOR AREA showing GROUND / FIRST / TOTAL rows with m² values. Read these exactly.
 
-3. OVERALL BUILDING DIMENSIONS: Use ONLY the outermost dimension string — the longest single dimension chain that spans the full building width and length. Do NOT add up sub-dimensions. The overall dimension is usually shown outside all other dimension chains.
+3. OVERALL BUILDING DIMENSIONS — THIS IS CRITICAL:
+   On UK architectural floor plans, dimensions are shown in parallel chains (strings).
+   The OVERALL building dimension is the SINGLE largest number on each axis — it equals 
+   the sum of ALL the smaller sub-dimensions on that axis.
+   
+   METHOD: For each axis (horizontal and vertical), find ALL the dimension chains.
+   The overall dimension is the OUTERMOST one — positioned furthest from the building.
+   It will be a single number (e.g. 7015 or 9828) shown on its own dimension line 
+   outside all other parallel dimension lines.
+   
+   COMMON MISTAKE TO AVOID: Do NOT use sub-dimensions like 6310 (which is the internal 
+   clear width between walls). The overall dimension INCLUDES the wall thicknesses on both 
+   sides. For example if the internal width is 6310 and walls are 353mm each side, 
+   the overall is 6310 + 353 + 353 = 7016 ≈ 7015mm. Always use the outermost single number.
+   
+   If you cannot confidently identify the outermost overall dimension, look for a dimension 
+   string that appears at the very edge of the drawing, furthest from the building outline.
 
 4. DOOR AND WINDOW SCHEDULES: Look for tables titled DOOR SCHEDULE and WINDOW SCHEDULE. Read EVERY row including the reference number, location, and structural opening size (width x height in mm).
 
 5. CEILING HEIGHTS: Read from SECTION drawings. Look for annotations showing FFL (Finished Floor Level) to ceiling. Common format: "2375 FFL TO CEILING" or similar.
 
-6. ROOF PITCH — CRITICAL: On SECTION drawings, the roof pitch angle is shown as a small number with a degree symbol (e.g. "35°") positioned at the EAVES of the roof — at the junction where the rafter meets the wall plate. It is drawn as a small arc (semicircle) between the rafter line and the horizontal, with the angle number next to it. This is inside or adjacent to the insulation hatching at the eaves. Look specifically at the bottom corner of the roof triangle on each side where the rafter line meets the top of the external wall. IMPORTANT: Staircase drawings also show PITCH annotations (e.g. "PITCH=41°") — these refer to the staircase angle NOT the roof. The staircase pitch annotation is always near stair riser/going dimensions. IGNORE staircase pitch. Only read the angle shown at the roof eaves.
+6. ROOF PITCH — CRITICAL:
+   Look at the SECTION drawings (Section A-A, Section B-B etc).
+   The roof forms a triangle shape. At the bottom left and bottom right corners of this 
+   triangle — where the sloping rafter line meets the horizontal wall plate — there is a 
+   small arc symbol with a number and degree symbol next to it (e.g. "35°").
+   This small arc is the pitch angle indicator. It sits within the insulation hatching 
+   at the eaves junction. The number is typically between 20° and 50°.
+   
+   CRITICAL WARNING: Staircase details show "PITCH = 41°" or similar — this is the 
+   STAIRCASE pitch (gradient of the steps), NOT the roof. Ignore any pitch annotation 
+   that appears near stair treads, risers, going dimensions, or staircase outlines.
+   The ROOF pitch is at the eaves of the roof triangle only.
+   
+   If you see TWO pitch annotations — one near a staircase and one at the roof eaves — 
+   the one at the ROOF EAVES is correct. Use that one.
 
 7. WALL CONSTRUCTION: Read the BRICK/BLOCKWORK LEGEND shown on drawings. Look for outer leaf thickness (usually 102mm brick), cavity width, and inner leaf (usually 100mm block).
 
@@ -391,6 +421,29 @@ Return ONLY JSON with these fields (use null for anything genuinely not found):
       missing: [...new Set([...(pass1.missing || []), ...(p2?.missing || [])])],
       notes: [...(pass1.notes || [])],
     };
+
+    // ── DIMENSION VALIDATION ──────────────────────────────────────────────
+    // Check if extracted dimensions make sense against floor area
+    // If they look wrong, add a warning and try to correct
+
+    if (result.floor.length_m && result.floor.width_m && fa.ground_m2) {
+      const calculatedArea = result.floor.length_m * result.floor.width_m;
+      const ratio = calculatedArea / fa.ground_m2;
+      
+      // If calculated area is way off from actual floor area, dimensions are wrong
+      if (ratio < 0.5 || ratio > 3.0) {
+        console.warn(`Dimension validation failed: ${result.floor.length_m} x ${result.floor.width_m} = ${calculatedArea.toFixed(1)}m² but floor area is ${fa.ground_m2}m²`);
+        result.missing.push(`Overall dimensions may be incorrect — extracted ${result.floor.length_m}m x ${result.floor.width_m}m but floor area is ${fa.ground_m2}m². Please check and correct in the Dimensions tab.`);
+        result.notes.push(`DIMENSION WARNING: Extracted dims (${result.floor.length_m}m x ${result.floor.width_m}m) don't match floor area (${fa.ground_m2}m²). The AI may have read sub-dimensions instead of overall dimensions.`);
+      }
+    }
+
+    // If roof pitch is 41, it's probably the staircase pitch — warn the user
+    if (result.roof.pitch_degrees === 41) {
+      result.roof.pitch_degrees = null;
+      result.missing.push('Roof pitch — 41° was found but this is likely the staircase pitch. Please enter the roof pitch manually.');
+      result.notes.push('Roof pitch of 41° was rejected as it matches the typical UK staircase pitch. Check section drawing at roof eaves for the correct pitch.');
+    }
 
     // If we got floor areas, add a note
     if (fa.total_m2) {
