@@ -12,7 +12,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '4.0.0' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '4.2.0' }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -198,17 +198,24 @@ Return ONLY this JSON. No markdown. No explanation.
   "notes": ["important observations about the drawings"]
 }
 
-RULES:
-1. ALL dimensions must be in millimetres as integers
-2. Floor areas must be in m² as decimals
-3. Look for floor area table in the title block — it is usually labelled FLOOR AREA with GROUND / FIRST / TOTAL
-4. Look for DOOR SCHEDULE and WINDOW SCHEDULE tables — read every row
-5. Read every dimension string on every drawing
-6. The overall building dimensions are usually shown as the outermost dimension chain
-7. Ceiling heights are usually shown on section drawings as FFL to ceiling annotations
-8. Wall construction is shown in the brick/blockwork legend and section drawings
-9. Roof pitch is shown on section drawings — look for angle annotation
-10. Never estimate — only extract values explicitly written on the drawing`
+CRITICAL RULES:
+1. ALL dimensions must be in millimetres as integers. Floor areas in m² as decimals.
+
+2. FLOOR AREA TABLE: Look in the title block (usually bottom right) for a table labelled FLOOR AREA showing GROUND / FIRST / TOTAL rows with m² values. Read these exactly.
+
+3. OVERALL BUILDING DIMENSIONS: Use ONLY the outermost dimension string — the longest single dimension chain that spans the full building width and length. Do NOT add up sub-dimensions. The overall dimension is usually shown outside all other dimension chains.
+
+4. DOOR AND WINDOW SCHEDULES: Look for tables titled DOOR SCHEDULE and WINDOW SCHEDULE. Read EVERY row including the reference number, location, and structural opening size (width x height in mm).
+
+5. CEILING HEIGHTS: Read from SECTION drawings. Look for annotations showing FFL (Finished Floor Level) to ceiling. Common format: "2375 FFL TO CEILING" or similar.
+
+6. ROOF PITCH — CRITICAL: On SECTION drawings, the roof pitch angle is shown as a small number with a degree symbol (e.g. "35°") positioned at the EAVES of the roof — at the junction where the rafter meets the wall plate. It is drawn as a small arc (semicircle) between the rafter line and the horizontal, with the angle number next to it. This is inside or adjacent to the insulation hatching at the eaves. Look specifically at the bottom corner of the roof triangle on each side where the rafter line meets the top of the external wall. IMPORTANT: Staircase drawings also show PITCH annotations (e.g. "PITCH=41°") — these refer to the staircase angle NOT the roof. The staircase pitch annotation is always near stair riser/going dimensions. IGNORE staircase pitch. Only read the angle shown at the roof eaves.
+
+7. WALL CONSTRUCTION: Read the BRICK/BLOCKWORK LEGEND shown on drawings. Look for outer leaf thickness (usually 102mm brick), cavity width, and inner leaf (usually 100mm block).
+
+8. NEVER estimate, calculate or guess. Only extract numbers explicitly written on the drawing.
+
+9. NEVER confuse internal sub-dimensions with overall building dimensions. The overall dimension is the single outermost number spanning the full building.`
         }
       ]
     }], 6000);
