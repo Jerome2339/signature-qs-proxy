@@ -14,7 +14,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
  
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '6.0.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '6.1.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
  
@@ -139,7 +139,11 @@ function mergeDocAIResults(results) {
     }
   }
  
-  console.log('Extracted entities:', JSON.stringify(allEntities, null, 2));
+  console.log('=== DOCUMENT AI ENTITIES ===');
+  Object.entries(allEntities).forEach(([key, val]) => {
+    console.log(`  ${key}: "${val.value}" (confidence: ${(val.confidence*100).toFixed(0)}%)`);
+  });
+  console.log('============================');
  
   // Helper to get numeric value
   const getNum = (key) => {
@@ -155,8 +159,8 @@ function mergeDocAIResults(results) {
   const totalArea = getNum('floor_area_total_m2');
   const lengthMm = getNum('overall_length_mm');
   const widthMm = getNum('overall_width_mm');
-  const ceilGroundMm = getNum('ceiling_height_ground_mm');
-  const ceilFirstMm = getNum('ceiling_height_first_mm');
+  const ceilGroundMm = getNum('ceiling_height_ground_mm') || getNum('ceiling_height_gr');
+  const ceilFirstMm = getNum('ceiling_height_first_mm') || getNum('ceiling_height_fir') || getNum('ceiling_height_fi');
   const roofPitch = getNum('roof_pitch_degrees');
   const wallOuterMm = getNum('wall_outer_leaf_mm');
   const wallCavityMm = getNum('wall_cavity_mm');
@@ -179,7 +183,9 @@ function mergeDocAIResults(results) {
     floor: {
       length_m: lengthMm ? lengthMm / 1000 : null,
       width_m: widthMm ? widthMm / 1000 : null,
-      area_m2: groundArea,
+      // Use ground floor area for single storey, or ground for materials calc base
+      // If ground < total, ground is correct. If they're the same, it may be total mislabelled.
+      area_m2: groundArea && totalArea && groundArea < totalArea ? groundArea : groundArea || totalArea,
       ceiling_height_m: ceilGroundMm ? ceilGroundMm / 1000 : null,
     },
  
@@ -200,14 +206,26 @@ function mergeDocAIResults(results) {
       overhang_m: null,
     },
  
-    wall_construction: getStr('wall_construction') || 'cavity',
+    wall_construction: (() => {
+      const wc = (getStr('wall_construction') || '').toLowerCase();
+      // Map common blockwork legend labels to standard types
+      if (wc.includes('cavity') || wc.includes('brick') || wc.includes('block') || 
+          wc.includes('aglite') || wc.includes('dense') || wc.includes('lightweight')) return 'cavity';
+      if (wc.includes('timber') || wc.includes('stud') || wc.includes('frame')) return 'timber';
+      if (wc.includes('solid')) return 'solid';
+      return 'cavity'; // default for UK residential
+    })(),
     floor_construction: getStr('floor_construction_ground') || 'concrete',
  
     extra: {
       house_type: getStr('house_type'),
       client: getStr('client') || getStr('project_name'),
       floor_areas: { ground_m2: groundArea, first_m2: firstArea, total_m2: totalArea },
-      ceiling_heights: { ground_floor_mm: ceilGroundMm, first_floor_mm: ceilFirstMm },
+      ceiling_heights: { 
+        ground_floor_mm: ceilGroundMm, 
+        first_floor_mm: ceilFirstMm,
+        // Log what we found for debugging
+      },
       wall_spec: {
         type: getStr('wall_construction') || 'cavity',
         outer_leaf: getStr('wall_outer_leaf'),
