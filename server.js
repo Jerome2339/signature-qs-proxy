@@ -459,12 +459,15 @@ For EACH kitchen and bathroom/ensuite/WC found in the drawings:
 4. List all components with sizes and quantities
 
 SVG requirements:
-- Dark background rect fill="#1a1a18", gold accents stroke="#b8964e"
-- Show walls as thick lines, units/fittings as rectangles with labels
-- Label each unit/fitting clearly in small white text font-size="10"
 - Use viewBox="0 0 500 400" xmlns="http://www.w3.org/2000/svg"
+- Background: rect x="0" y="0" width="500" height="400" fill="#1a1a18"
+- Walls: rect elements with fill="#2a2a28" stroke="#b8964e" stroke-width="8"
+- Units/fittings: rect elements with fill="#2a2a28" stroke="#6b6960" stroke-width="1"
+- Text labels: text fill="#ffffff" font-size="9" font-family="sans-serif"
+- IMPORTANT: In the SVG, use single quotes for all attribute values to avoid breaking JSON
+- Example: rect x='10' y='10' width='100' height='50' fill='#2a2a28'
 
-Return ONLY valid JSON, no markdown:
+Return ONLY valid JSON (no markdown, no code blocks):
 {
   "kitchen": {
     "room_name": "Kitchen",
@@ -510,7 +513,18 @@ Return ONLY valid JSON, no markdown:
     if (!resp.ok) throw new Error('Claude API ' + resp.status);
     const data = await resp.json();
     const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
-    const result = JSON.parse(raw);
+    let result;
+    try {
+      result = JSON.parse(raw);
+    } catch(parseErr) {
+      // Try to extract JSON from response if it has extra text
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('Could not parse response: ' + parseErr.message);
+      }
+    }
     res.json({ success: true, data: result });
 
   } catch(err) {
