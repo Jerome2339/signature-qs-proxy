@@ -14,7 +14,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '6.2.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '6.3.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -392,23 +392,36 @@ async function extractSchedulesWithClaude(files) {
 
   fileParts.push({
     type: 'text',
-    text: `Look for DOOR SCHEDULE and WINDOW SCHEDULE tables in these drawings. Read every row.
+    text: `Extract ALL door and window opening sizes from these drawings using TWO methods:
+
+METHOD 1 — SCHEDULES (preferred):
+Look for DOOR SCHEDULE and WINDOW SCHEDULE tables. Read every row.
+
+METHOD 2 — PLANS AND ELEVATIONS (fallback if no schedule):
+If no schedule exists, read opening sizes directly from:
+- Floor plans: dimension lines shown across doorways and window openings
+- Elevations: width and height dimensions shown on window and door openings
+- Sections: opening widths and heights with dimension annotations
+Label these as D01, D02... W01, W02... in order of appearance on drawings.
 
 Return ONLY this JSON, no markdown:
 {
   "doors": [
-    { "ref": "D01", "location": "Hall", "structural_w_mm": 1023, "structural_h_mm": 2100, "type": "single" }
+    { "ref": "D01", "location": "Hall", "structural_w_mm": 1023, "structural_h_mm": 2100, "type": "single", "source": "schedule" }
   ],
   "windows": [
-    { "ref": "W01", "location": "Living", "structural_w_mm": 836, "structural_h_mm": 1500, "type": "bay" }
+    { "ref": "W01", "location": "Living", "structural_w_mm": 836, "structural_h_mm": 1500, "type": "standard", "source": "elevation" }
   ]
 }
 
 Rules:
-- Read the STRUCTURAL OPENING size (width x height in mm) not the leaf size
-- Include every single row from both schedules
-- For bi-fold doors set type to "bifold"
-- If no schedule found return empty arrays`
+- Always read the STRUCTURAL OPENING size (width x height in mm) not the frame or leaf size
+- Include every single opening found — do not skip any
+- For bi-fold or sliding doors set type to "bifold"
+- For bay windows set type to "bay"
+- source field: use "schedule" if from a schedule table, "plan" if from floor plan dimensions, "elevation" if from elevation drawings
+- If genuinely no opening sizes can be found anywhere, return empty arrays
+- Roof windows and Velux units: include as windows with type "rooflight"`
   });
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
