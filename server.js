@@ -14,7 +14,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '6.9.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.0.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -464,7 +464,70 @@ app.post('/kb-design', async (req, res) => {
       return { type: 'image', source: { type: 'base64', media_type: img.type || 'image/jpeg', data: img.data } };
     });
 
-    fileParts.push({ type: 'text', text: `You are an expert kitchen and bathroom designer. Analyse these architectural drawings carefully.
+    fileParts.push({ type: 'text', text: `You are an expert kitchen and bathroom designer and SVG coder. Analyse these architectural drawings carefully.
+
+COORDINATE SYSTEM - follow this EXACTLY:
+1. Canvas: viewBox='0 0 560 460'
+2. Room border: 30px from edge on all sides
+3. Room inner area: x=30, y=30, width=500, height=400
+4. Scale: s = min(500/room_w_mm, 400/room_h_mm) — calculate this precisely
+5. All coordinates: room_x = 30 + (mm_from_left * s), room_y = 30 + (mm_from_top * s)
+6. Wall thickness in SVG: 12px
+
+KITCHEN SVG — STEP BY STEP:
+Step 1: Calculate s = min(500/room_width_mm, 400/room_height_mm)
+Step 2: Draw room background rect at x='30' y='30' width=room_w_mm*s height=room_h_mm*s fill='#232320'
+Step 3: Draw 4 walls as thick border lines stroke='#b8964e' stroke-width='12'
+Step 4: Place base units (600mm deep, 560mm high) TOUCHING each wall:
+  - Top wall units: y=30, height=600*s, run full width
+  - Bottom wall units: y=30+room_h*s-600*s, height=600*s
+  - Left wall units if L-shape: x=30, width=600*s
+Step 5: Draw worktop as rect on top of each base unit run, height=40*s, fill='#3a3a38' stroke='#b8964e' stroke-width='2'
+Step 6: Draw wall units (300mm deep) as dashed rect ABOVE base units: stroke-dasharray='4,2' height=300*s
+Step 7: Mark sink: circle r='15' at sink position
+Step 8: Mark hob: 4 small circles for burners
+Step 9: Add dimension lines and mm labels
+Step 10: Add room name label at bottom centre
+
+BATHROOM SVG — STEP BY STEP:  
+Step 1: Calculate s = min(500/room_width_mm, 400/room_height_mm)
+Step 2: Draw room and walls same as kitchen
+Step 3: Bath (1700x750mm): place along longest wall, touching wall
+  - rect width=1700*s height=750*s, inner oval for bath shape
+Step 4: WC (500x660mm): place on shortest wall or corner, cistern against wall
+  - rect for cistern, rounded rect for pan
+Step 5: Basin (600x480mm): wall-hung on remaining wall
+  - rect with small circle for plug
+Step 6: Shower (900x900mm): in corner if space allows
+  - rect with dashed lines showing glass screen
+Step 7: Show door swing as arc
+Step 8: Add all dimension labels
+
+LABELLING:
+- Each item: short gold text fill='#b8964e' font-size='10' font-family='Arial,sans-serif'
+- Dimensions: grey text fill='#6b6960' font-size='8'
+- Room name: gold bold text at bottom fill='#b8964e' font-size='12' font-weight='bold'
+- All text inside room boundary — never overflowing
+
+COLOURS:
+- Canvas bg: fill='#1a1a18'
+- Room floor: fill='#232320'
+- Walls/border: stroke='#b8964e' stroke-width='12' fill='none'
+- Base units: fill='#2a2a28' stroke='#6b6960' stroke-width='1'
+- Worktop: fill='#3a3a38' stroke='#b8964e' stroke-width='2'
+- Wall units: fill='#222220' stroke='#4a4a48' stroke-width='1' stroke-dasharray='4,2'
+- Sanitaryware: fill='#2e2e2c' stroke='#888' stroke-width='1'
+- Shower glass: stroke='#6b9fd4' stroke-width='1' stroke-dasharray='3,2' fill='none'
+
+ISLAND RULE: Only add if room_w_mm - 1200 >= 1800 (900mm clearance each side of 600mm deep units + island)
+If island: place centred, 900x1200mm minimum, draw hob as 4 burner circles in centre
+
+OPEN PLAN: If adjacent dining/living area visible, extend island to boundary, add breakfast bar overhang 300mm on dining side
+
+IMPORTANT — JSON FORMATTING:
+- Use ONLY single quotes inside SVG attributes
+- No double quotes anywhere inside the svg string
+- Escape any apostrophes in text as &apos;
 
 CRITICAL SVG RULES:
 - The SVG canvas is 500x400px. The room takes up the full canvas minus a 20px border.
