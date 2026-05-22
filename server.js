@@ -14,7 +14,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '6.4.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '6.7.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -450,7 +450,57 @@ app.post('/kb-design', async (req, res) => {
       return { type: 'image', source: { type: 'base64', media_type: img.type || 'image/jpeg', data: img.data } };
     });
 
-    fileParts.push({ type: 'text', text: `You are a kitchen and bathroom designer. Analyse these architectural drawings and design fitted layouts.
+    fileParts.push({ type: 'text', text: `You are an expert kitchen and bathroom designer. Analyse these architectural drawings carefully.
+
+CRITICAL SVG RULES:
+- The SVG canvas is 500x400px. The room takes up the full canvas minus a 20px border.
+- Calculate a scale factor: scale = min(460/room_width_mm, 360/room_height_mm)
+- Draw ALL units and fittings AGAINST THE WALLS, not floating in the centre
+- Room origin starts at x=20, y=20
+- Wall thickness = 15px
+- Units sit INSIDE the room touching the walls
+
+KITCHEN LAYOUT RULES:
+- Run base units along the longest walls, 600mm deep (scaled)
+- Wall units are 300mm deep (scaled), directly above base units
+- Sink goes under a window if possible (usually middle of a run)
+- Tall units (fridge/oven) go at the end of a run
+- ISLAND RULE: If room allows 900mm clearance on ALL sides between island and surrounding worktops, add a central island unit. Island minimum size 800x1200mm. Place hob in the island centre. Label island "Island+Hob". If clearance cannot be achieved, do NOT add island.
+- Clearance check: room_width_mm - (2 x 600mm units depth) - island_depth >= 900mm AND room_length_mm - island_length >= 900mm each end
+- OPEN PLAN RULE: If the kitchen opens into a dining or living area with no dividing wall (look for labels like DINING, LIVING, OPEN PLAN on the drawings), the kitchen layout can extend into that space. In this case:
+  - Run base units along the kitchen walls as normal
+  - Position the island at the boundary between kitchen and dining/living, acting as a natural divider
+  - The island can be larger (up to 1000x2400mm) in open plan layouts
+  - Place the hob in the island facing the dining area
+  - Add a breakfast bar overhang (300mm) on the dining side of the island for seating
+  - Show the dining area boundary with a dashed line on the SVG
+  - Label the island "Island+Hob" and add "Bfast Bar" label on the dining side
+- Show worktop as a thin line (3px) on top of base units and island
+- Label each unit with short text: "B600", "W600", "Tall", "Sink", "Island+Hob"
+- Show dimensions at bottom: width x height mm
+- In the component list, add island unit, hob, and breakfast bar overhang if island is included
+
+BATHROOM LAYOUT RULES:
+- WC always goes against a wall, cistern touching the wall
+- Bath goes along the longest wall
+- Basin goes on a short wall or beside the bath
+- Shower enclosure goes in a corner if room allows
+- Never float items in the centre
+- Label: "Bath", "WC", "Basin", "Shower"
+
+SVG COLOUR SCHEME:
+- Background: fill='#1a1a18'
+- Room floor: fill='#232320'  
+- Walls: fill='#2a2a28' stroke='#b8964e' stroke-width='15'
+- Base units/sanitaryware: fill='#2e2e2c' stroke='#6b6960' stroke-width='1'
+- Worktop line: stroke='#b8964e' stroke-width='3'
+- Wall units: fill='#252523' stroke='#4a4a48' stroke-width='1' stroke-dasharray='3,2'
+- Text labels: fill='#b8964e' font-size='9' font-family='Arial,sans-serif'
+- Dimension text: fill='#6b6960' font-size='8'
+- Room label at bottom: fill='#b8964e' font-size='11' font-weight='bold'
+
+IMPORTANT: Use ONLY single quotes for ALL SVG attribute values. Double quotes will break the JSON.
+Example: rect x='20' y='20' width='460' height='360' fill='#232320'
 
 For EACH kitchen and bathroom/ensuite/WC found in the drawings:
 1. Read the room dimensions from the floor plan
