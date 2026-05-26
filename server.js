@@ -6,6 +6,16 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+
+// ── PREFERRED SUPPLIERS (configured by Signature Construction) ────────────
+// Client just toggles which type they want - emails are pre-configured here
+const SUPPLIER_EMAILS = {
+  builders:  process.env.BUILDERS_MERCHANT_EMAIL  || '',
+  kitchen:   process.env.KITCHEN_SUPPLIER_EMAIL   || '',
+  bathroom:  process.env.BATHROOM_SUPPLIER_EMAIL  || '',
+  tiling:    process.env.TILING_SUPPLIER_EMAIL    || '',
+  windows:   process.env.WINDOWS_SUPPLIER_EMAIL   || '',
+};
 const RESEND_KEY = process.env.RESEND_API_KEY;
 const GOOGLE_SA_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY; // JSON string of service account key
 const DOCAI_PROCESSOR = 'https://eu-documentai.googleapis.com/v1/projects/843787881834/locations/eu/processors/b39e11de77cfc99e/processorVersions/pretrained-foundation-model-v1.5-pro-2025-06-20:process';
@@ -667,15 +677,23 @@ app.post('/send-quote', async (req, res) => {
   if (!merchants?.length) return res.status(400).json({ error: 'No merchants specified' });
 
   const CATS = {
-    builders: ['Masonry','Timber Frame','Floor (Concrete)','Floor (Timber)','Roof (Flat)','Roof (Pitched)','Boards & Linings','Structural','Fixings & Sundries'],
-    kitchen: ['Kitchen','Kitchen Fittings'],
+    builders: ['Masonry','Timber Frame','Ground Floor (Concrete Slab)','Ground Floor (Beam & Block)','First Floor (Timber)','Floor (Concrete)','Floor (Timber)','Roof (Flat)','Roof (Pitched)','Boards & Linings','Structural','Rainwater Goods','Fixings & Sundries'],
+    kitchen: ['Kitchen','Kitchen Fittings','Kitchen & Bathroom'],
     bathroom: ['Bathroom','Sanitaryware','Plumbing'],
     tiling: ['Tiling','Floor Tiles','Wall Tiles'],
+    windows: ['Second Fix Joinery','Windows','Doors','Glazing'],
   };
 
   const results = [];
   for (const merchant of merchants) {
     try {
+      // Use pre-configured supplier email from server env vars
+      // Client only toggles type - never sees or enters email
+      const supplierEmail = SUPPLIER_EMAILS[merchant.type] || merchant.email;
+      if (!supplierEmail) {
+        results.push({ merchant: merchant.name, status: 'skipped', error: 'No email configured for this supplier type' });
+        continue;
+      }
       const cats = CATS[merchant.type] || CATS.builders;
       const filtered = materials.filter(m => cats.some(c => m.cat.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(m.cat.toLowerCase())));
       const matsToSend = filtered.length > 0 ? filtered : (merchant.type === 'builders' ? materials : null);
@@ -692,7 +710,7 @@ app.post('/send-quote', async (req, res) => {
       const er = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: 'Signature QS <onboarding@resend.dev>', to: [merchant.email], reply_to: 'jerome@signature-construction.com', subject: `Materials Quote Request — ${project.name||'Project'} — ${new Date().toLocaleDateString('en-GB')}`, html, attachments }),
+        body: JSON.stringify({ from: 'Signature QS <onboarding@resend.dev>', to: [supplierEmail], reply_to: 'jerome@signature-construction.com', subject: `Materials Quote Request — ${project.name||'Project'} — ${new Date().toLocaleDateString('en-GB')}`, html, attachments }),
       });
       const ed = await er.json();
       results.push(er.ok ? { merchant: merchant.name, status: 'sent', id: ed.id } : { merchant: merchant.name, status: 'error', error: ed.message||'Send failed' });
