@@ -24,7 +24,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.0.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.1.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -416,17 +416,29 @@ async function extractSchedulesWithClaude(files) {
 
   fileParts.push({
     type: 'text',
-    text: `Extract ALL door and window opening sizes from these drawings using TWO methods:
+    text: `Extract ALL door and window opening sizes from these architectural drawings.
 
-METHOD 1 — SCHEDULES (preferred):
-Look for DOOR SCHEDULE and WINDOW SCHEDULE tables. Read every row.
+STEP 1 — FIND THE SCHEDULE:
+Look carefully through ALL uploaded sheets for any of these:
+- A sheet titled "Schedules", "Schedule & Detail List", "Door & Window Schedule"
+- A table with columns like: Door Reference, Location, Structural Opening, Leaf Size
+- A table with columns like: Window Ref, Location, Structural Opening, Lintel Type
+These schedule tables are the most reliable source — READ EVERY ROW.
 
-METHOD 2 — PLANS AND ELEVATIONS (fallback if no schedule):
-If no schedule exists, read opening sizes directly from:
-- Floor plans: dimension lines shown across doorways and window openings
-- Elevations: width and height dimensions shown on window and door openings
-- Sections: opening widths and heights with dimension annotations
-Label these as D01, D02... W01, W02... in order of appearance on drawings.
+STEP 2 — IF NO SCHEDULE EXISTS, read from drawings:
+- Floor plans: read dimension strings across door and window openings, note reference codes
+- Elevation drawings: read width and height dimensions shown on each opening
+- Sections: read opening heights from section cuts
+- Label openings sequentially: D01, D02... W01, W02... in order found
+
+IMPORTANT RULES:
+- Read the STRUCTURAL OPENING size (width x height in mm) — NOT the leaf/frame size
+- For schedules, this is usually listed separately from the leaf size
+- Include EVERY opening — do not skip any
+- Bi-fold and sliding doors: set type to "bifold"
+- Bay windows: set type to "bay"
+- Rooflights/Velux: set type to "rooflight"
+- source field: "schedule", "plan", or "elevation"
 
 Return ONLY this JSON, no markdown:
 {
@@ -710,7 +722,7 @@ app.post('/send-quote', async (req, res) => {
       const er = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: 'Signature QS <onboarding@resend.dev>', to: [supplierEmail], reply_to: 'jerome@signature-construction.com', subject: `Materials Quote Request — ${project.name||'Project'} — ${new Date().toLocaleDateString('en-GB')}`, html, attachments }),
+        body: JSON.stringify({ from: 'Signature QS <onboarding@resend.dev>', to: [merchant.email], reply_to: 'jerome@signature-construction.com', subject: `Materials Quote Request — ${project.name||'Project'} — ${new Date().toLocaleDateString('en-GB')}`, html, attachments }),
       });
       const ed = await er.json();
       results.push(er.ok ? { merchant: merchant.name, status: 'sent', id: ed.id } : { merchant: merchant.name, status: 'error', error: ed.message||'Send failed' });
