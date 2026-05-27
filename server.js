@@ -24,7 +24,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.1.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.2.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -425,11 +425,31 @@ Look carefully through ALL uploaded sheets for any of these:
 - A table with columns like: Window Ref, Location, Structural Opening, Lintel Type
 These schedule tables are the most reliable source — READ EVERY ROW.
 
-STEP 2 — IF NO SCHEDULE EXISTS, read from drawings:
-- Floor plans: read dimension strings across door and window openings, note reference codes
-- Elevation drawings: read width and height dimensions shown on each opening
-- Sections: read opening heights from section cuts
-- Label openings sequentially: D01, D02... W01, W02... in order found
+STEP 2 — IF NO SCHEDULE EXISTS, read from elevation and plan drawings:
+ELEVATION DRAWINGS are the best source when no schedule exists:
+- Front, rear and side elevations clearly show every window and door opening
+- Read the horizontal dimension string shown ACROSS each opening (width in mm)
+- Read the vertical dimension string shown UP EACH opening (height in mm)
+- Opening widths on the Cottesbrooke elevations are typically 750-1810mm
+- Opening heights are typically 1050mm for windows, 2035-2100mm for doors
+- Count every opening visible on all four elevations, avoiding double-counting
+- Label D01, D02... for doors (full height openings) and W01, W02... for windows
+
+FLOOR PLAN DRAWINGS — use to identify room locations:
+- Note which room each opening is in (Hall, Kitchen, Living, Bedroom 1 etc.)
+- Match door/window codes (D01, W01) to room labels
+- Use plan dimension strings to confirm opening widths where visible
+
+SECTION DRAWINGS — use to get heights:
+- Read floor-to-ceiling heights and opening heights from section cuts
+- Stairwell openings and internal door heights often shown in sections
+
+TYPICAL SIZES (use as fallback if dimensions not legible):
+- External doors: 1023 x 2100mm structural opening
+- French/bifold doors: 1810-2485mm wide x 2100mm high
+- Standard windows: 910 x 1050mm structural opening  
+- Living room windows: 1810 x 1350mm structural opening
+- Bathroom windows: 685 x 1050mm (obscure glazing)
 
 IMPORTANT RULES:
 - Read the STRUCTURAL OPENING size (width x height in mm) — NOT the leaf/frame size
