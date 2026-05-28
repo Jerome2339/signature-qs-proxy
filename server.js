@@ -24,7 +24,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.2.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.3.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -106,7 +106,24 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
       if (!docaiRes.ok) {
         const err = await docaiRes.text();
         console.error('Document AI error:', docaiRes.status, err);
-        // Fall back to Claude for this file
+        // Retry once after 2 seconds for 500 errors
+        if (docaiRes.status === 500) {
+          console.log(`Retrying ${file.originalname} after 500 error...`);
+          await new Promise(r => setTimeout(r, 2000));
+          const retryToken = await getGoogleToken();
+          const retryRes = await fetch(DOCAI_PROCESSOR, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${retryToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rawDocument: { content: fileBuffer.toString('base64'), mimeType } })
+          });
+          if (retryRes.ok) {
+            const retryData = await retryRes.json();
+            results.push({ file: file.originalname, data: retryData });
+            console.log(`Retry successful for ${file.originalname}`);
+            continue;
+          }
+          console.log(`Retry also failed for ${file.originalname}, skipping`);
+        }
         continue;
       }
 
