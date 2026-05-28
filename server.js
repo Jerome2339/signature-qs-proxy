@@ -443,30 +443,32 @@ Look carefully through ALL uploaded sheets for any of these:
 These schedule tables are the most reliable source — READ EVERY ROW.
 
 STEP 2 — IF NO SCHEDULE EXISTS, read from elevation and plan drawings:
-ELEVATION DRAWINGS are the best source when no schedule exists:
-- Front, rear and side elevations clearly show every window and door opening
-- Read the horizontal dimension string shown ACROSS each opening (width in mm)
-- Read the vertical dimension string shown UP EACH opening (height in mm)
-- Opening widths on the Cottesbrooke elevations are typically 750-1810mm
-- Opening heights are typically 1050mm for windows, 2035-2100mm for doors
-- Count every opening visible on all four elevations, avoiding double-counting
-- Label D01, D02... for doors (full height openings) and W01, W02... for windows
+ELEVATION DRAWINGS — best source for sizes without a schedule:
+- Each elevation (front, rear, side) shows every external opening with dimensions
+- Read the dimension string ACROSS each opening for width in mm
+- Read the dimension string UP each opening for height in mm
+- Count all openings across all elevations, do not double-count same opening
+- External doors are full height (~2100mm), windows are shorter (~1050mm high)
+- Label D01, D02... for doors and W01, W02... for windows in order found
 
-FLOOR PLAN DRAWINGS — use to identify room locations:
-- Note which room each opening is in (Hall, Kitchen, Living, Bedroom 1 etc.)
-- Match door/window codes (D01, W01) to room labels
-- Use plan dimension strings to confirm opening widths where visible
+FLOOR PLAN DRAWINGS — use for room names and opening codes:
+- Door reference codes (D01, D02 etc.) shown next to door swings
+- Window reference codes (W01, W02 etc.) shown next to window symbols
+- Dimension strings alongside walls often include opening widths
+- Door swing arcs confirm door locations — measure the arc chord for approximate width
+- Note room names next to each opening for the location field
 
-SECTION DRAWINGS — use to get heights:
-- Read floor-to-ceiling heights and opening heights from section cuts
-- Stairwell openings and internal door heights often shown in sections
+SECTION DRAWINGS — use for heights:
+- Internal door heights often visible in section cuts
+- Floor to ceiling heights help estimate opening proportions
 
-TYPICAL SIZES (use as fallback if dimensions not legible):
-- External doors: 1023 x 2100mm structural opening
-- French/bifold doors: 1810-2485mm wide x 2100mm high
-- Standard windows: 910 x 1050mm structural opening  
-- Living room windows: 1810 x 1350mm structural opening
-- Bathroom windows: 685 x 1050mm (obscure glazing)
+IMPORTANT — do your absolute best to extract sizes:
+- Even if dimensions are small or partially obscured, make your best read
+- If a dimension is unclear, use the most common size for that opening type
+- Typical UK residential: external doors 900-1023mm wide x 2100mm high
+- Typical windows: 600-1810mm wide x 900-1200mm high
+- Bi-fold doors: 1800-3600mm wide x 2100mm high
+- Never return empty arrays if openings are clearly visible in the drawings
 
 IMPORTANT RULES:
 - Read the STRUCTURAL OPENING size (width x height in mm) — NOT the leaf/frame size
