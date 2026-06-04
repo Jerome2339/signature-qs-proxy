@@ -24,7 +24,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.3.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.4.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -511,6 +511,51 @@ Rules:
   try { return JSON.parse(raw); } catch(e) { return null; }
 }
 
+
+
+// ── LOG ORDER ─────────────────────────────────────────────────────────────
+app.post('/log-order', async (req, res) => {
+  try {
+    const { ref, value, fee, date, supplier, logged } = req.body;
+    if (!value) return res.status(400).json({ error: 'No order value' });
+
+    // Email Signature with order confirmation
+    if (RESEND_KEY) {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_KEY}` },
+        body: JSON.stringify({
+          from: 'Signature QS Platform <onboarding@resend.dev>',
+          to: ['jerome@signature-construction.com'],
+          reply_to: 'jerome@signature-construction.com',
+          subject: `Order logged — ${ref || 'New order'} — £${Number(value).toLocaleString('en-GB')}`,
+          html: `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:2rem">
+              <h2 style="color:#b8964e;margin-bottom:1rem">Order confirmed</h2>
+              <table style="width:100%;border-collapse:collapse;font-size:14px">
+                <tr><td style="padding:8px 0;color:#666;width:160px">Job reference</td><td style="padding:8px 0;font-weight:500">${ref||'—'}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Order value</td><td style="padding:8px 0;font-weight:500">£${Number(value).toLocaleString('en-GB')}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Signature fee (1.5%)</td><td style="padding:8px 0;font-weight:500;color:#b8964e">£${Number(fee).toLocaleString('en-GB')}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Supplier</td><td style="padding:8px 0">${supplier||'—'}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Order date</td><td style="padding:8px 0">${date||'—'}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Logged at</td><td style="padding:8px 0">${new Date(logged).toLocaleString('en-GB')}</td></tr>
+              </table>
+              <div style="margin-top:1.5rem;padding:1rem;background:#f9f6f0;border-radius:6px;font-size:13px;color:#666">
+                Please raise an invoice for £${Number(fee).toLocaleString('en-GB')} + VAT to the merchant.
+              </div>
+            </div>
+          `
+        })
+      });
+    }
+
+    console.log(`Order logged: ${ref} — £${value} — fee: £${fee}`);
+    res.json({ success: true });
+  } catch(err) {
+    console.error('Log order error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── KB DESIGN ─────────────────────────────────────────────────────────────
 app.post('/kb-design', async (req, res) => {
