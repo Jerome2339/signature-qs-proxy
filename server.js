@@ -17,6 +17,56 @@ const SUPPLIER_EMAILS = {
   windows:   process.env.WINDOWS_SUPPLIER_EMAIL   || '',
 };
 const RESEND_KEY = process.env.RESEND_API_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;       // e.g. https://xxxx.supabase.co
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role key (server-side only)
+
+// Helper: insert a usage record into Supabase
+async function supabaseInsert(record) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return null;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/usage_log`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(record)
+  });
+  if (!r.ok) { console.error('Supabase insert failed:', r.status, await r.text()); return null; }
+  return await r.json();
+}
+
+// Helper: count records for current month
+async function supabaseMonthCount(client) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return 0;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const url = `${SUPABASE_URL}/rest/v1/usage_log?ts=gte.${monthStart}` + (client ? `&client=eq.${encodeURIComponent(client)}` : '');
+  const r = await fetch(url, {
+    method: 'GET',
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Prefer': 'count=exact', 'Range': '0-0' }
+  });
+  if (!r.ok) return 0;
+  const cr = r.headers.get('content-range'); // format: 0-0/N
+  if (cr && cr.includes('/')) return parseInt(cr.split('/')[1]) || 0;
+  return 0;
+}
+
+// Helper: fetch records for a given month offset (0 = this month, -1 = last month)
+async function supabaseMonthRecords(monthOffset) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1).toISOString();
+  const end = new Date(now.getFullYear(), now.getMonth() + monthOffset + 1, 1).toISOString();
+  const url = `${SUPABASE_URL}/rest/v1/usage_log?ts=gte.${start}&ts=lt.${end}&order=ts.asc`;
+  const r = await fetch(url, {
+    method: 'GET',
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+  });
+  if (!r.ok) return [];
+  return await r.json();
+}
 const GOOGLE_SA_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY; // JSON string of service account key
 const DOCAI_PROCESSOR = 'https://eu-documentai.googleapis.com/v1/projects/843787881834/locations/eu/processors/b39e11de77cfc99e/processorVersions/pretrained-foundation-model-v1.5-pro-2025-06-20:process';
 
@@ -24,7 +74,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.4.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.5.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -554,6 +604,112 @@ app.post('/log-order', async (req, res) => {
   } catch(err) {
     console.error('Log order error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── USAGE LOGGING (Spinks billing, Supabase-backed) ──────────────────────
+app.post('/log-usage', async (req, res) => {
+  try {
+    const { client, project, houseType, results, ts } = req.body;
+    const fee = 75;
+    const record = {
+      client: client || 'Spinks',
+      project: project || 'Unnamed project',
+      house_type: houseType || '',
+      total_m2: (results && results.total_m2) ? String(results.total_m2) : '',
+      doors: (results && results.doors) ? results.doors : 0,
+      windows: (results && results.windows) ? results.windows : 0,
+      fee: fee,
+      ts: ts || new Date().toISOString()
+    };
+
+    // Persist to Supabase
+    await supabaseInsert(record);
+
+    // Email per-upload notification
+    if (RESEND_KEY) {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_KEY}` },
+        body: JSON.stringify({
+          from: 'Signature QS Platform <onboarding@resend.dev>',
+          to: ['jerome@signature-construction.com'],
+          reply_to: 'jerome@signature-construction.com',
+          subject: `Upload logged — ${record.client} — ${record.project} — £${fee}`,
+          html: `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:2rem">
+              <h2 style="color:#b8964e;margin-bottom:1rem">Drawing set uploaded &amp; analysed</h2>
+              <table style="width:100%;border-collapse:collapse;font-size:14px">
+                <tr><td style="padding:8px 0;color:#666;width:160px">Client</td><td style="padding:8px 0;font-weight:500">${record.client}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Project</td><td style="padding:8px 0;font-weight:500">${record.project}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">House type</td><td style="padding:8px 0">${record.house_type||'—'}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Total floor area</td><td style="padding:8px 0">${record.total_m2||'—'} m²</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Doors / Windows</td><td style="padding:8px 0">${record.doors} / ${record.windows}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Fee</td><td style="padding:8px 0;font-weight:500;color:#b8964e">£${fee}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Date / time</td><td style="padding:8px 0">${new Date(record.ts).toLocaleString('en-GB')}</td></tr>
+              </table>
+            </div>
+          `
+        })
+      });
+    }
+
+    const monthCount = await supabaseMonthCount(record.client);
+    res.json({ success: true, monthCount, fee });
+  } catch(err) {
+    console.error('Log usage error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Counter on page load
+app.get('/usage-count', async (req, res) => {
+  try {
+    const client = req.query.client || '';
+    const monthCount = await supabaseMonthCount(client);
+    res.json({ monthCount });
+  } catch(err) {
+    res.json({ monthCount: 0 });
+  }
+});
+
+// Monthly summary — emails last month's total (call on the 1st or manually)
+app.get('/monthly-summary', async (req, res) => {
+  try {
+    const records = await supabaseMonthRecords(-1); // last month
+    const total = records.length * 75;
+    const lastMonth = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+    const monthName = lastMonth.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+
+    if (RESEND_KEY && records.length > 0) {
+      const rows = records.map(r =>
+        `<tr><td style="padding:6px 0;border-bottom:1px solid #eee">${new Date(r.ts).toLocaleDateString('en-GB')}</td><td style="padding:6px 0;border-bottom:1px solid #eee">${r.project}</td><td style="padding:6px 0;border-bottom:1px solid #eee">${r.house_type||'—'}</td><td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right">£${r.fee}</td></tr>`
+      ).join('');
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_KEY}` },
+        body: JSON.stringify({
+          from: 'Signature QS Platform <onboarding@resend.dev>',
+          to: ['jerome@signature-construction.com'],
+          subject: `Monthly summary — ${monthName} — ${records.length} uploads — £${total}`,
+          html: `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:2rem">
+              <h2 style="color:#b8964e">Monthly usage summary — ${monthName}</h2>
+              <p style="font-size:14px;color:#666">${records.length} house drawing sets uploaded.</p>
+              <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:1rem">
+                <thead><tr><th style="text-align:left;padding:6px 0;border-bottom:2px solid #b8964e">Date</th><th style="text-align:left;padding:6px 0;border-bottom:2px solid #b8964e">Project</th><th style="text-align:left;padding:6px 0;border-bottom:2px solid #b8964e">House type</th><th style="text-align:right;padding:6px 0;border-bottom:2px solid #b8964e">Fee</th></tr></thead>
+                <tbody>${rows}</tbody>
+                <tfoot><tr><td colspan="3" style="padding:10px 0;font-weight:600">Total to invoice</td><td style="padding:10px 0;text-align:right;font-weight:600;color:#b8964e">£${total}</td></tr></tfoot>
+              </table>
+            </div>
+          `
+        })
+      });
+    }
+    res.json({ success: true, month: monthName, count: records.length, total });
+  } catch(err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
