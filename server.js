@@ -74,7 +74,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.5.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.6.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -709,6 +709,78 @@ app.get('/monthly-summary', async (req, res) => {
     }
     res.json({ success: true, month: monthName, count: records.length, total });
   } catch(err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── KITCHEN/BATHROOM LEAD CAPTURE ─────────────────────────────────────────
+async function supabaseInsertLead(record) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return null;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(record)
+  });
+  if (!r.ok) { console.error('Supabase lead insert failed:', r.status, await r.text()); return null; }
+  return await r.json();
+}
+
+app.post('/log-lead', async (req, res) => {
+  try {
+    const { email, name, postcode, type, grade, value, spec, summary } = req.body;
+    if (!email) return res.status(400).json({ error: 'No email provided' });
+
+    const record = {
+      email: email,
+      name: name || '',
+      postcode: postcode || '',
+      lead_type: type || 'kitchen',
+      grade: grade || '',
+      configured_value: value || 0,
+      spec: spec ? JSON.stringify(spec) : '',
+      summary: summary || '',
+      ts: new Date().toISOString()
+    };
+
+    await supabaseInsertLead(record);
+
+    // Email the lead to Signature
+    if (RESEND_KEY) {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_KEY}` },
+        body: JSON.stringify({
+          from: 'Signature QS Platform <onboarding@resend.dev>',
+          to: ['jerome@signature-construction.com'],
+          reply_to: email,
+          subject: `New ${record.lead_type} lead — ${record.grade} — £${Number(record.configured_value).toLocaleString('en-GB')}`,
+          html: `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:2rem">
+              <h2 style="color:#b8964e;margin-bottom:1rem">New ${record.lead_type} lead captured</h2>
+              <table style="width:100%;border-collapse:collapse;font-size:14px">
+                <tr><td style="padding:8px 0;color:#666;width:160px">Grade</td><td style="padding:8px 0;font-weight:600;color:#b8964e">${record.grade}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Configured value</td><td style="padding:8px 0;font-weight:500">£${Number(record.configured_value).toLocaleString('en-GB')} (supply)</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Name</td><td style="padding:8px 0">${record.name||'—'}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Email</td><td style="padding:8px 0">${record.email}</td></tr>
+                <tr><td style="padding:8px 0;color:#666">Postcode</td><td style="padding:8px 0">${record.postcode||'—'}</td></tr>
+              </table>
+              <div style="margin-top:1.25rem;padding:1rem;background:#f9f6f0;border-radius:6px;font-size:13px;color:#444">
+                <strong>Configured spec:</strong><br>${record.summary||'—'}
+              </div>
+            </div>
+          `
+        })
+      });
+    }
+
+    res.json({ success: true });
+  } catch(err) {
+    console.error('Log lead error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
