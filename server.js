@@ -76,9 +76,44 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.7.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.8.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
+
+// ── ROOM CLASSIFICATION ──────────────────────────────────────────────────
+// Normalise an extracted room into one of our standard buckets.
+// Used so the materials tool can count bathrooms/kitchens/utilities reliably,
+// regardless of exactly how the model labels them.
+function classifyRoomType(rawName, rawType) {
+  const s = ((rawType || '') + ' ' + (rawName || '')).toLowerCase();
+  if (/cloak|w\.?c\b|\bwc\b|powder/.test(s)) return 'cloakroom';
+  if (/en[-\s]?suite|ensuite/.test(s)) return 'ensuite';
+  if (/bath|shower\s?room/.test(s)) return 'bathroom';
+  if (/utility|laundry/.test(s)) return 'utility';
+  if (/kitchen/.test(s)) return 'kitchen';
+  if (/bed/.test(s)) return 'bedroom';
+  if (/living|lounge|sitting|family\s?room/.test(s)) return 'living';
+  if (/dining/.test(s)) return 'dining';
+  if (/hall|landing|lobby|porch/.test(s)) return 'circulation';
+  if (/garage/.test(s)) return 'garage';
+  if (/office|study/.test(s)) return 'study';
+  return 'other';
+}
+
+// Normalise a raw rooms array (from any extraction pass) into typed rooms.
+function normaliseRooms(rawRooms) {
+  if (!Array.isArray(rawRooms)) return [];
+  return rawRooms.map(r => {
+    if (typeof r === 'string') {
+      return { name: r, floor: null, type: classifyRoomType(r, null) };
+    }
+    return {
+      name: r.name || r.label || '',
+      floor: r.floor || null,
+      type: r.type && r.type !== 'null' ? classifyRoomType(r.name, r.type) : classifyRoomType(r.name, null)
+    };
+  }).filter(r => r.name);
+}
 
 // ── GOOGLE AUTH ────────────────────────────────────────────────────────────
 let cachedToken = null;
@@ -192,7 +227,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
     const merged = mergeDocAIResults(results);
     console.log(`Document AI extraction complete: ${merged.walls?.length || 0} walls, roof pitch: ${merged.roof?.pitch_degrees}°`);
 
-    // Pass 2: Use Claude to extract door/window schedules (tables Claude reads reliably)
+    // Pass 2: Use Claude to extract door/window schedules + room schedule (tables Claude reads reliably)
     if (ANTHROPIC_KEY && req.files.length > 0) {
       try {
         console.log('Running schedule extraction pass with Claude...');
@@ -219,6 +254,14 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
           merged.extra.door_count = doors.length;
           merged.extra.window_count = windows.length;
           console.log(`Schedule extraction: ${doors.length} doors, ${windows.length} windows`);
+        }
+        // Room schedule — merge in whenever the pass returns rooms (independent of door/window result)
+        if (scheduleData && Array.isArray(scheduleData.rooms) && scheduleData.rooms.length > 0) {
+          merged.extra.rooms = normaliseRooms(scheduleData.rooms);
+          const counts = merged.extra.rooms.reduce((a, r) => { a[r.type] = (a[r.type]||0) + 1; return a; }, {});
+          console.log(`Room extraction: ${merged.extra.rooms.length} rooms — ` +
+            `bath ${counts.bathroom||0}, ensuite ${counts.ensuite||0}, cloak ${counts.cloakroom||0}, ` +
+            `kitchen ${counts.kitchen||0}, utility ${counts.utility||0}`);
         }
       } catch(err) {
         console.warn('Schedule extraction failed (non-critical):', err.message);
@@ -408,7 +451,7 @@ async function analyseWithClaude(req, res) {
   "floor_construction": { "ground": null, "upper": null },
   "doors": [{ "ref": null, "location": null, "structural_w_mm": null, "structural_h_mm": null }],
   "windows": [{ "ref": null, "location": null, "structural_w_mm": null, "structural_h_mm": null, "type": null }],
-  "rooms": [{ "name": null, "floor": null }],
+  "rooms": [{ "name": null, "floor": null, "type": null }],
   "notes": [],
   "cannot_determine": []
 }
@@ -417,6 +460,7 @@ KEY RULES:
 - Floor area table is in the title block — rows labelled GROUND/FIRST/TOTAL
 - Roof pitch is the arc symbol at the eaves on section drawings (NOT staircase PITCH=41°)
 - Door/window schedules are tables — read every row
+- ROOMS: list every room labelled on the floor plans. For each, set "name" to the label as drawn (e.g. "En-suite 2") and "type" to ONE of: cloakroom, bathroom, ensuite, kitchen, utility, bedroom, living, dining, hall, garage, study, other. Classify WCs / powder rooms as "cloakroom", any bath or shower room as "bathroom", en-suites as "ensuite", and laundry / utility rooms as "utility". Set "floor" to ground or first if known.
 - Do NOT attempt overall building dimensions — user will enter manually`
     });
 
@@ -459,7 +503,7 @@ KEY RULES:
           floor_areas: fa,
           ceiling_heights: ch,
           wall_spec: wc,
-          rooms: parsed.rooms || [],
+          rooms: normaliseRooms(parsed.rooms || []),
           door_count: doors.length,
           window_count: windows.length,
         },
@@ -485,7 +529,7 @@ async function extractSchedulesWithClaude(files) {
 
   fileParts.push({
     type: 'text',
-    text: `Extract ALL door and window opening sizes from these architectural drawings.
+    text: `Extract ALL door and window opening sizes, AND a list of every room, from these architectural drawings.
 
 STEP 1 — FIND THE SCHEDULE:
 Look carefully through ALL uploaded sheets for any of these:
@@ -514,6 +558,20 @@ SECTION DRAWINGS — use for heights:
 - Internal door heights often visible in section cuts
 - Floor to ceiling heights help estimate opening proportions
 
+STEP 3 — ROOM SCHEDULE (IMPORTANT):
+Read the room label printed inside every room on the floor plans (ground and first floor).
+List each room once. For each room return:
+- "name": the label exactly as drawn (e.g. "En-suite 2", "Utility", "W.C.")
+- "type": classify into ONE of exactly these values:
+    cloakroom  (WCs, cloakrooms, powder rooms — a small WC/basin room)
+    bathroom   (any bath or shower room)
+    ensuite    (a bathroom directly off a bedroom)
+    kitchen    (kitchen or kitchen/diner)
+    utility    (utility or laundry room)
+    bedroom, living, dining, hall, garage, study, other  (everything else)
+- "floor": "ground" or "first" if you can tell, else null
+Count carefully — a typical house has one kitchen, sometimes a utility, and several bath/shower/WC rooms. Do not invent rooms that are not labelled; do not merge two rooms into one.
+
 IMPORTANT — do your absolute best to extract sizes:
 - Even if dimensions are small or partially obscured, make your best read
 - If a dimension is unclear, use the most common size for that opening type
@@ -538,6 +596,13 @@ Return ONLY this JSON, no markdown:
   ],
   "windows": [
     { "ref": "W01", "location": "Living", "structural_w_mm": 836, "structural_h_mm": 1500, "type": "standard", "source": "elevation" }
+  ],
+  "rooms": [
+    { "name": "Kitchen/Diner", "type": "kitchen", "floor": "ground" },
+    { "name": "Utility", "type": "utility", "floor": "ground" },
+    { "name": "W.C.", "type": "cloakroom", "floor": "ground" },
+    { "name": "Bathroom", "type": "bathroom", "floor": "first" },
+    { "name": "En-suite", "type": "ensuite", "floor": "first" }
   ]
 }
 
@@ -548,18 +613,19 @@ Rules:
 - For bay windows set type to "bay"
 - source field: use "schedule" if from a schedule table, "plan" if from floor plan dimensions, "elevation" if from elevation drawings
 - If genuinely no opening sizes can be found anywhere, return empty arrays
-- Roof windows and Velux units: include as windows with type "rooflight"`
+- Roof windows and Velux units: include as windows with type "rooflight"
+- If genuinely no room labels can be read, return an empty rooms array`
   });
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: fileParts }] }),
+    body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: fileParts }] }),
   });
 
   if (!resp.ok) throw new Error(`Claude schedule API ${resp.status}`);
   const data = await resp.json();
-  const raw = data.content.map(c => c.text || '').join('').replace(/\`\`\`json|\`\`\`/g, '').trim();
+  const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
   try { return JSON.parse(raw); } catch(e) { return null; }
 }
 
