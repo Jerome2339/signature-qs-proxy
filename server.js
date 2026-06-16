@@ -86,7 +86,7 @@ setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 // regardless of exactly how the model labels them.
 function classifyRoomType(rawName, rawType) {
   const s = ((rawType || '') + ' ' + (rawName || '')).toLowerCase();
-  if (/cloak|w\.?c\b|\bwc\b|powder/.test(s)) return 'cloakroom';
+  if (/cloak|\bw[\.\/]?c\b|powder|toilet/.test(s)) return 'cloakroom';
   if (/en[-\s]?suite|ensuite/.test(s)) return 'ensuite';
   if (/bath|shower\s?room/.test(s)) return 'bathroom';
   if (/utility|laundry/.test(s)) return 'utility';
@@ -460,7 +460,7 @@ KEY RULES:
 - Floor area table is in the title block — rows labelled GROUND/FIRST/TOTAL
 - Roof pitch is the arc symbol at the eaves on section drawings (NOT staircase PITCH=41°)
 - Door/window schedules are tables — read every row
-- ROOMS: list every room labelled on the floor plans. For each, set "name" to the label as drawn (e.g. "En-suite 2") and "type" to ONE of: cloakroom, bathroom, ensuite, kitchen, utility, bedroom, living, dining, hall, garage, study, other. Classify WCs / powder rooms as "cloakroom", any bath or shower room as "bathroom", en-suites as "ensuite", and laundry / utility rooms as "utility". Set "floor" to ground or first if known.
+- ROOMS: list every room labelled on the floor plans. For each, set "name" to the label as drawn (e.g. "En-suite 2") and "type" to ONE of: cloakroom, bathroom, ensuite, kitchen, utility, bedroom, living, dining, hall, garage, study, other. Classify any WC / W.C. / W/C / toilet / powder room as "cloakroom", any bath or shower room as "bathroom", en-suites as "ensuite", and laundry / utility rooms as "utility". Set "floor" to ground or first if known.
 - Do NOT attempt overall building dimensions — user will enter manually`
     });
 
@@ -563,7 +563,7 @@ Read the room label printed inside every room on the floor plans (ground and fir
 List each room once. For each room return:
 - "name": the label exactly as drawn (e.g. "En-suite 2", "Utility", "W.C.")
 - "type": classify into ONE of exactly these values:
-    cloakroom  (WCs, cloakrooms, powder rooms — a small WC/basin room)
+    cloakroom  (any WC / W.C. / W/C / toilet / cloakroom / powder room — a small WC/basin room, often downstairs)
     bathroom   (any bath or shower room)
     ensuite    (a bathroom directly off a bedroom)
     kitchen    (kitchen or kitchen/diner)
