@@ -76,7 +76,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.1', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -141,18 +141,26 @@ async function getGoogleToken() {
   const sig = sign.sign(sa.private_key, 'base64url');
   const jwt = `${header}.${payload}.${sig}`;
 
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
-  });
-
-  const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) throw new Error('Failed to get Google token: ' + JSON.stringify(tokenData));
-
-  cachedToken = tokenData.access_token;
-  tokenExpiry = Date.now() + (tokenData.expires_in * 1000);
-  return cachedToken;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Connection': 'close' },
+        body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+      });
+      const tokenData = await tokenRes.json();
+      if (!tokenData.access_token) throw new Error('Failed to get Google token: ' + JSON.stringify(tokenData));
+      cachedToken = tokenData.access_token;
+      tokenExpiry = Date.now() + (tokenData.expires_in * 1000);
+      return cachedToken;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`Google token fetch attempt ${attempt}/3 failed: ${e.message}`);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 400 * attempt));
+    }
+  }
+  throw lastErr;
 }
 
 // ── ANALYSE DRAWING ────────────────────────────────────────────────────────
@@ -470,7 +478,9 @@ KEY RULES:
       body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] }),
     });
 
+    if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('Claude API ' + resp.status + ': ' + t.slice(0, 300)); }
     const data = await resp.json();
+    if (!data || !Array.isArray(data.content)) throw new Error('Claude returned no content: ' + JSON.stringify(data).slice(0, 300));
     const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
     let parsed;
     try { parsed = JSON.parse(raw); } catch(e) { return res.status(502).json({ error: 'Could not parse response' }); }
