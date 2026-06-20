@@ -120,7 +120,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.6', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.7', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -667,7 +667,7 @@ Rules:
   let raw = null, lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const txt = await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: fileParts }] });
+      const txt = await anthropicStream({ model: 'claude-haiku-4-5-20251001', max_tokens: 3000, messages: [{ role: 'user', content: fileParts }] });
       raw = txt.replace(/```json|```/g, '').trim();
       break;
     } catch (e) {
