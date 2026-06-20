@@ -76,7 +76,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.8.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -531,15 +531,20 @@ async function extractSchedulesWithClaude(files) {
     type: 'text',
     text: `Extract ALL door and window opening sizes, AND a list of every room, from these architectural drawings.
 
-STEP 1 — FIND THE SCHEDULE:
-Look carefully through ALL uploaded sheets for any of these:
+STEP 1 — FIND AND READ THE SCHEDULE (this overrides every other source):
+Look carefully through ALL uploaded sheets for a Door Schedule and/or Window Schedule:
 - A sheet titled "Schedules", "Schedule & Detail List", "Door & Window Schedule"
 - A table with columns like: Door Reference, Location, Structural Opening, Leaf Size
 - A table with columns like: Window Ref, Location, Structural Opening, Lintel Type
-These schedule tables are the most reliable source — READ EVERY ROW.
+If such a schedule table exists, it is the ONLY valid source of opening sizes. You MUST:
+- Return EVERY row of the table. If the schedule lists 17 windows, return 17 window objects — never skip, merge, sample or stop early. The number of window objects you return MUST equal the number of window rows in the table (same for doors).
+- Read each "Structural Opening" cell EXACTLY as printed. It is WIDTH x HEIGHT in millimetres — the FIRST number is width, the SECOND is height. Examples: "885 x 1500" => structural_w_mm 885, structural_h_mm 1500; "460 x 900" => 460 wide, 900 high; "2515 x 1500" => 2515 wide, 1500 high.
+- Use the Window Ref / Door Reference exactly as printed (W01, W02, D01...), and the Location text from that same row.
+- Do NOT measure, scale, estimate or round any size from elevations or floor plans when a schedule row exists for that opening. Schedule values ALWAYS win, even if an elevation looks different. Never output a measured span such as 1809 or 4285 for a window the schedule lists as 885 or 910, and never fall back to a default height like 1050 when the schedule gives a height.
+- If a size cell is genuinely blank or illegible, return null for that dimension — never substitute a guess or an elevation reading.
 
-STEP 2 — IF NO SCHEDULE EXISTS, read from elevation and plan drawings:
-ELEVATION DRAWINGS — best source for sizes without a schedule:
+STEP 2 — ONLY IF NO SCHEDULE TABLE EXISTS AT ALL, read from elevation and plan drawings:
+ELEVATION DRAWINGS — best source for sizes when there is no schedule:
 - Each elevation (front, rear, side) shows every external opening with dimensions
 - Read the dimension string ACROSS each opening for width in mm
 - Read the dimension string UP each opening for height in mm
