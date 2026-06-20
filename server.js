@@ -38,27 +38,30 @@ async function anthropicStream(body) {
     body: JSON.stringify({ ...body, stream: true }),
   });
   if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('Claude API ' + resp.status + ': ' + t.slice(0, 300)); }
-  const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buf = '', text = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
+  const handleLine = (line) => {
+    line = line.trim();
+    if (!line.startsWith('data:')) return;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') return;
+    let evt;
+    try { evt = JSON.parse(payload); } catch (e) { return; }
+    if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) text += evt.delta.text;
+    if (evt.type === 'error') throw new Error('Claude stream error: ' + JSON.stringify(evt.error).slice(0, 200));
+  };
+  const consume = (chunk) => {
+    buf += decoder.decode(chunk, { stream: true });
     let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === '[DONE]') continue;
-      try {
-        const evt = JSON.parse(payload);
-        if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) text += evt.delta.text;
-        if (evt.type === 'error') throw new Error('Claude stream error: ' + JSON.stringify(evt.error).slice(0, 200));
-      } catch (e) { if (/stream error/.test(e.message)) throw e; }
-    }
+    while ((nl = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+  };
+  if (resp.body && typeof resp.body.getReader === 'function') {
+    const reader = resp.body.getReader();           // WHATWG ReadableStream
+    while (true) { const { done, value } = await reader.read(); if (done) break; consume(value); }
+  } else {
+    for await (const chunk of resp.body) consume(chunk);   // Node Readable stream
   }
+  if (buf.trim()) handleLine(buf);
   return text;
 }
 
@@ -117,7 +120,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.5', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.6', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
