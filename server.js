@@ -30,38 +30,56 @@ try {
 // Non-streaming Anthropic calls send no bytes until generation finishes (20s+ for a
 // full schedule read), so an idle-connection timeout on the path drops them as
 // "Premature close". Streaming keeps bytes flowing continuously and defeats that.
-async function anthropicStream(body) {
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25' },
-    body: JSON.stringify({ ...body, stream: true }),
+// undici (Node's global fetch) premature-closes reading Cloudflare-fronted response bodies
+// on this instance. The built-in https module uses a different HTTP stack and gets through.
+function anthropicStream(body) {
+  const https = require('https');
+  const payload = JSON.stringify({ ...body, stream: true });
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25',
+      },
+    }, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        let errBody = '';
+        res.setEncoding('utf8');
+        res.on('data', d => { errBody += d; });
+        res.on('end', () => reject(new Error('Claude API ' + res.statusCode + ': ' + errBody.slice(0, 300))));
+        return;
+      }
+      let buf = '', text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        buf += chunk;
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line.startsWith('data:')) continue;
+          const p = line.slice(5).trim();
+          if (!p || p === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(p);
+            if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) text += evt.delta.text;
+          } catch (e) { /* ignore keep-alive / non-JSON lines */ }
+        }
+      });
+      res.on('end', () => resolve(text));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(120000, () => req.destroy(new Error('Anthropic request timeout (120s)')));
+    req.write(payload);
+    req.end();
   });
-  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('Claude API ' + resp.status + ': ' + t.slice(0, 300)); }
-  const decoder = new TextDecoder();
-  let buf = '', text = '';
-  const handleLine = (line) => {
-    line = line.trim();
-    if (!line.startsWith('data:')) return;
-    const payload = line.slice(5).trim();
-    if (!payload || payload === '[DONE]') return;
-    let evt;
-    try { evt = JSON.parse(payload); } catch (e) { return; }
-    if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) text += evt.delta.text;
-    if (evt.type === 'error') throw new Error('Claude stream error: ' + JSON.stringify(evt.error).slice(0, 200));
-  };
-  const consume = (chunk) => {
-    buf += decoder.decode(chunk, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
-  };
-  if (resp.body && typeof resp.body.getReader === 'function') {
-    const reader = resp.body.getReader();           // WHATWG ReadableStream
-    while (true) { const { done, value } = await reader.read(); if (done) break; consume(value); }
-  } else {
-    for await (const chunk of resp.body) consume(chunk);   // Node Readable stream
-  }
-  if (buf.trim()) handleLine(buf);
-  return text;
 }
 
 async function supabaseInsert(record) {
@@ -119,7 +137,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.8', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.9', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
