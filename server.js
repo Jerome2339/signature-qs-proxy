@@ -21,6 +21,13 @@ const SUPABASE_URL = process.env.SUPABASE_URL;       // e.g. https://xxxx.supaba
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role key (server-side only)
 
 // Helper: insert a usage record into Supabase
+// Stale pooled keep-alive sockets on this host cause undici "Premature close" on
+// outbound calls (Google, Anthropic, Supabase, Resend). Force a fresh connection on
+// every request. This is side-effect-safe — it changes connection handling only, no retry.
+const _nativeFetch = globalThis.fetch;
+globalThis.fetch = (url, opts = {}) =>
+  _nativeFetch(url, { ...opts, headers: { ...(opts.headers || {}), 'Connection': 'close' } });
+
 async function supabaseInsert(record) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
   const r = await fetch(`${SUPABASE_URL}/rest/v1/usage_log`, {
@@ -76,7 +83,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.3', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.4', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -627,14 +634,24 @@ Rules:
 - If genuinely no room labels can be read, return an empty rooms array`
   });
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: fileParts }] }),
-  });
-
-  if (!resp.ok) throw new Error(`Claude schedule API ${resp.status}`);
-  const data = await resp.json();
+  let data = null, lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: fileParts }] }),
+      });
+      if (!resp.ok) throw new Error(`Claude schedule API ${resp.status}`);
+      data = await resp.json();
+      break;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`Schedule extraction attempt ${attempt}/3 failed: ${e.message}`);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 800 * attempt));
+    }
+  }
+  if (!data) throw lastErr;
   const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
   try { return JSON.parse(raw); } catch(e) { return null; }
 }
