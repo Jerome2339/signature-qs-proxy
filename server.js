@@ -21,12 +21,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL;       // e.g. https://xxxx.supaba
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role key (server-side only)
 
 // Helper: insert a usage record into Supabase
-// Stale pooled keep-alive sockets on this host cause undici "Premature close" on
-// outbound calls (Google, Anthropic, Supabase, Resend). Force a fresh connection on
-// every request. This is side-effect-safe — it changes connection handling only, no retry.
-const _nativeFetch = globalThis.fetch;
-globalThis.fetch = (url, opts = {}) =>
-  _nativeFetch(url, { ...opts, headers: { ...(opts.headers || {}), 'Connection': 'close' } });
+try {
+  const { setGlobalDispatcher, Agent } = require('undici');
+  setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0, keepAliveTimeout: 10000, pipelining: 0 }));
+  console.log('undici read timeouts disabled');
+} catch (e) { console.warn('undici tuning unavailable (continuing without it):', e.message); }
 
 // Non-streaming Anthropic calls send no bytes until generation finishes (20s+ for a
 // full schedule read), so an idle-connection timeout on the path drops them as
@@ -120,7 +119,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.7', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.8', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
