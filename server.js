@@ -28,6 +28,40 @@ const _nativeFetch = globalThis.fetch;
 globalThis.fetch = (url, opts = {}) =>
   _nativeFetch(url, { ...opts, headers: { ...(opts.headers || {}), 'Connection': 'close' } });
 
+// Non-streaming Anthropic calls send no bytes until generation finishes (20s+ for a
+// full schedule read), so an idle-connection timeout on the path drops them as
+// "Premature close". Streaming keeps bytes flowing continuously and defeats that.
+async function anthropicStream(body) {
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25' },
+    body: JSON.stringify({ ...body, stream: true }),
+  });
+  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('Claude API ' + resp.status + ': ' + t.slice(0, 300)); }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '', text = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const evt = JSON.parse(payload);
+        if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) text += evt.delta.text;
+        if (evt.type === 'error') throw new Error('Claude stream error: ' + JSON.stringify(evt.error).slice(0, 200));
+      } catch (e) { if (/stream error/.test(e.message)) throw e; }
+    }
+  }
+  return text;
+}
+
 async function supabaseInsert(record) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
   const r = await fetch(`${SUPABASE_URL}/rest/v1/usage_log`, {
@@ -83,7 +117,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.4', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.5', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -461,26 +495,19 @@ KEY RULES:
 - Do NOT attempt overall building dimensions — user will enter manually`
     });
 
-    let data = null, lastErr;
+    let raw = null, lastErr;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25', 'Connection': 'close' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] }),
-        });
-        if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('Claude API ' + resp.status + ': ' + t.slice(0, 300)); }
-        const d = await resp.json();
-        if (!d || !Array.isArray(d.content)) throw new Error('Claude returned no content: ' + JSON.stringify(d).slice(0, 300));
-        data = d; break;
+        const txt = await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] });
+        raw = txt.replace(/```json|```/g, '').trim();
+        break;
       } catch (e) {
         lastErr = e;
         console.warn(`Claude fallback attempt ${attempt}/3 failed: ${e.message}`);
         if (attempt < 3) await new Promise(r => setTimeout(r, 1500 * attempt));
       }
     }
-    if (!data) throw lastErr;
-    const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
+    if (raw === null) throw lastErr;
     let parsed;
     try { parsed = JSON.parse(raw); } catch(e) { return res.status(502).json({ error: 'Could not parse response' }); }
 
@@ -634,16 +661,11 @@ Rules:
 - If genuinely no room labels can be read, return an empty rooms array`
   });
 
-  let data = null, lastErr;
+  let raw = null, lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: fileParts }] }),
-      });
-      if (!resp.ok) throw new Error(`Claude schedule API ${resp.status}`);
-      data = await resp.json();
+      const txt = await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 3000, messages: [{ role: 'user', content: fileParts }] });
+      raw = txt.replace(/```json|```/g, '').trim();
       break;
     } catch (e) {
       lastErr = e;
@@ -651,8 +673,7 @@ Rules:
       if (attempt < 3) await new Promise(r => setTimeout(r, 800 * attempt));
     }
   }
-  if (!data) throw lastErr;
-  const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
+  if (raw === null) throw lastErr;
   try { return JSON.parse(raw); } catch(e) { return null; }
 }
 
@@ -1058,20 +1079,7 @@ Return ONLY valid JSON (no markdown, no code blocks):
   ]
 }` });
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'pdfs-2024-09-25'
-      },
-      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] })
-    });
-
-    if (!resp.ok) throw new Error('Claude API ' + resp.status);
-    const data = await resp.json();
-    const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
+    const raw = (await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] })).replace(/```json|```/g, '').trim();
     let result;
     try {
       result = JSON.parse(raw);
