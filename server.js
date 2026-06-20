@@ -76,7 +76,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.1', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.2', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -181,49 +181,31 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
       const mimeType = file.mimetype.toLowerCase().includes('pdf') ? 'application/pdf' : file.mimetype;
 
       console.log(`Processing ${file.originalname} with Google Document AI...`);
-      const token = await getGoogleToken();
-
-      const docaiRes = await fetch(DOCAI_PROCESSOR, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          skipHumanReview: true,
-          rawDocument: {
-            mimeType,
-            content: b64,
-          },
-        }),
-      });
-
-      if (!docaiRes.ok) {
-        const err = await docaiRes.text();
-        console.error('Document AI error:', docaiRes.status, err);
-        // Retry once after 2 seconds for 500 errors
-        if (docaiRes.status === 500) {
-          console.log(`Retrying ${file.originalname} after 500 error...`);
-          await new Promise(r => setTimeout(r, 2000));
-          const retryToken = await getGoogleToken();
-          const retryRes = await fetch(DOCAI_PROCESSOR, {
+      let docaiData = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const token = await getGoogleToken();
+          const docaiRes = await fetch(DOCAI_PROCESSOR, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${retryToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rawDocument: { content: fileBuffer.toString('base64'), mimeType } })
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Connection': 'close' },
+            body: JSON.stringify({ skipHumanReview: true, rawDocument: { mimeType, content: b64 } }),
           });
-          if (retryRes.ok) {
-            const retryData = await retryRes.json();
-            results.push({ file: file.originalname, data: retryData });
-            console.log(`Retry successful for ${file.originalname}`);
-            continue;
+          if (!docaiRes.ok) {
+            const errTxt = await docaiRes.text().catch(() => '');
+            throw new Error(`Document AI ${docaiRes.status}: ${errTxt.slice(0, 300)}`);
           }
-          console.log(`Retry also failed for ${file.originalname}, skipping`);
+          docaiData = await docaiRes.json();
+          break;
+        } catch (e) {
+          console.warn(`Document AI attempt ${attempt}/3 for ${file.originalname} failed: ${e.message}`);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 1500 * attempt));
         }
-        continue;
       }
-
-      const docaiData = await docaiRes.json();
-      results.push({ file: file.originalname, data: docaiData });
+      if (docaiData) {
+        results.push({ file: file.originalname, data: docaiData });
+      } else {
+        console.error(`Document AI gave up on ${file.originalname} after 3 attempts — will fall back to Claude`);
+      }
     }
 
     if (!results.length) {
@@ -472,15 +454,25 @@ KEY RULES:
 - Do NOT attempt overall building dimensions — user will enter manually`
     });
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] }),
-    });
-
-    if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('Claude API ' + resp.status + ': ' + t.slice(0, 300)); }
-    const data = await resp.json();
-    if (!data || !Array.isArray(data.content)) throw new Error('Claude returned no content: ' + JSON.stringify(data).slice(0, 300));
+    let data = null, lastErr;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25', 'Connection': 'close' },
+          body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] }),
+        });
+        if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('Claude API ' + resp.status + ': ' + t.slice(0, 300)); }
+        const d = await resp.json();
+        if (!d || !Array.isArray(d.content)) throw new Error('Claude returned no content: ' + JSON.stringify(d).slice(0, 300));
+        data = d; break;
+      } catch (e) {
+        lastErr = e;
+        console.warn(`Claude fallback attempt ${attempt}/3 failed: ${e.message}`);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1500 * attempt));
+      }
+    }
+    if (!data) throw lastErr;
     const raw = data.content.map(c => c.text || '').join('').replace(/```json|```/g, '').trim();
     let parsed;
     try { parsed = JSON.parse(raw); } catch(e) { return res.status(502).json({ error: 'Could not parse response' }); }
