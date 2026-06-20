@@ -76,7 +76,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.2', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.9.3', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -545,25 +545,28 @@ If such a schedule table exists, it is the ONLY valid source of opening sizes. Y
 - Do NOT measure, scale, estimate or round any size from elevations or floor plans when a schedule row exists for that opening. Schedule values ALWAYS win, even if an elevation looks different. Never output a measured span such as 1809 or 4285 for a window the schedule lists as 885 or 910, and never fall back to a default height like 1050 when the schedule gives a height.
 - If a size cell is genuinely blank or illegible, return null for that dimension — never substitute a guess or an elevation reading.
 
-STEP 2 — ONLY IF NO SCHEDULE TABLE EXISTS AT ALL, read from elevation and plan drawings:
-ELEVATION DRAWINGS — best source for sizes when there is no schedule:
-- Each elevation (front, rear, side) shows every external opening with dimensions
-- Read the dimension string ACROSS each opening for width in mm
-- Read the dimension string UP each opening for height in mm
-- Count all openings across all elevations, do not double-count same opening
-- External doors are full height (~2100mm), windows are shorter (~1050mm high)
-- Label D01, D02... for doors and W01, W02... for windows in order found
+STEP 2 — IF THERE IS NO SCHEDULE TABLE (or it omits some openings), read every external opening from the ELEVATIONS, SECTIONS and FLOOR PLANS together. Most house drawings have NO window schedule, so this path must always return openings whenever any are drawn — never come back empty when openings are visible. Cross-reference the three drawing types:
 
-FLOOR PLAN DRAWINGS — use for room names and opening codes:
-- Door reference codes (D01, D02 etc.) shown next to door swings
-- Window reference codes (W01, W02 etc.) shown next to window symbols
-- Dimension strings alongside walls often include opening widths
-- Door swing arcs confirm door locations — measure the arc chord for approximate width
-- Note room names next to each opening for the location field
+ELEVATIONS — primary source for WIDTH, and to find and count every opening:
+- Every external window and door appears on a front, rear or side elevation. Find and return ALL of them.
+- Read the horizontal dimension string across each opening for its width in mm.
+- If no width is printed, estimate by scaling against a known dimension on the same elevation (a door leaf ~900mm, the floor-to-floor height, or the overall building width).
+- Do not double-count the same opening shown on more than one elevation.
 
-SECTION DRAWINGS — use for heights:
-- Internal door heights often visible in section cuts
-- Floor to ceiling heights help estimate opening proportions
+SECTIONS — primary source for HEIGHT (cross-reference these; do NOT just default every window to 1050):
+- Section drawings carry the vertical dimensions: cill (sill) height above finished floor, window head height, and door head height.
+- Window height = head height − cill height. Read the actual figures from the section. Window heights genuinely vary — ~900mm for a small WC/utility window up to ~1500mm+ for full-height or feature windows — so READ them, don't assume.
+- Door head height is typically ~2100mm; confirm from the section.
+- Use the floor-to-ceiling height on the section as a sanity check on opening proportions.
+- Only fall back to a typical height when NO section or elevation gives a readable vertical dimension, and even then vary it by opening type (shorter for WC/ensuite, taller for living spaces).
+
+FLOOR PLANS — for reference codes, locations, and a count cross-check:
+- Window/door reference codes (W01, D01...) next to symbols and swings.
+- The room each opening sits in — use it for the location field.
+- Door swing arcs confirm doors and give an approximate width (the arc chord).
+- The opening count on the plans should roughly match the elevation count — use it to catch any you missed.
+
+Combine them: WIDTH from the elevation, HEIGHT from the section, REF and LOCATION from the plan. Label W01, W02... for windows and D01, D02... for doors in the order found, and set source to "elevation".
 
 STEP 3 — ROOM SCHEDULE (IMPORTANT):
 Read the room label printed inside every room on the floor plans (ground and first floor).
