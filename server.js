@@ -137,7 +137,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.10.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.11.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -225,6 +225,8 @@ async function getGoogleToken() {
 }
 
 // ── ANALYSE DRAWING ────────────────────────────────────────────────────────
+const { parseVectorPDF } = require('./vectorParse');
+
 app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
 
@@ -278,8 +280,34 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
     const merged = mergeDocAIResults(results);
     console.log(`Document AI extraction complete: ${merged.walls?.length || 0} walls, roof pitch: ${merged.roof?.pitch_degrees}°`);
 
+    // Vector pass (short-circuit): on a CAD-exported PDF with a schedule, read the
+    // architect's actual text deterministically and skip the Claude schedule pass.
+    // DocAI geometry (walls etc.) is kept regardless. Falls through on raster/no-schedule/error.
+    let vectorUsed = false;
+    try {
+      const pdfFile = (req.files || []).find(f => (f.mimetype || '').toLowerCase().includes('pdf'));
+      if (pdfFile) {
+        const vec = await parseVectorPDF(pdfFile.buffer);
+        if (vec && vec.usable) {
+          merged.openings = vec.openings;
+          merged.extra.door_count = vec.door_count;
+          merged.extra.window_count = vec.window_count;
+          if (vec.rooms && vec.rooms.length) merged.extra.rooms = normaliseRooms(vec.rooms);
+          if (vec.floor_areas && vec.floor_areas.total_m2) merged.extra.floor_areas = vec.floor_areas;
+          if (vec.roof_pitch) merged.roof.pitch_degrees = vec.roof_pitch;
+          vectorUsed = true;
+          console.log(`Vector parse: ${vec.window_count} windows, ${vec.door_count} doors, ` +
+            `${(vec.rooms || []).length} rooms, GIFA ${vec.floor_areas?.total_m2 || '?'}m² — Claude schedule pass skipped`);
+        } else {
+          console.log(`Vector parse not usable (${vec && vec.vector ? 'no/partial schedule' : 'raster / no text layer'}) — using Claude schedule pass`);
+        }
+      }
+    } catch (e) {
+      console.warn('Vector parse failed (non-critical), falling back to Claude schedule pass:', e.message);
+    }
+
     // Pass 2: Use Claude to extract door/window schedules + room schedule (tables Claude reads reliably)
-    if (ANTHROPIC_KEY && req.files.length > 0) {
+    if (!vectorUsed && ANTHROPIC_KEY && req.files.length > 0) {
       try {
         console.log('Running schedule extraction pass with Claude...');
         const scheduleData = await extractSchedulesWithClaude(req.files);
@@ -319,7 +347,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
       }
     }
 
-    res.json({ success: true, data: merged, source: 'google-document-ai' });
+    res.json({ success: true, data: merged, source: vectorUsed ? 'vector-pdf + google-document-ai' : 'google-document-ai' });
 
   } catch (err) {
     console.error('Document AI error:', err.message);
@@ -599,6 +627,12 @@ If such a schedule table exists, it is the ONLY valid source of opening sizes. Y
 - Do NOT measure, scale, estimate or round any size from elevations or floor plans when a schedule row exists for that opening. Schedule values ALWAYS win, even if an elevation looks different. Never output a measured span such as 1809 or 4285 for a window the schedule lists as 885 or 910, and never fall back to a default height like 1050 when the schedule gives a height.
 - If a size cell is genuinely blank or illegible, return null for that dimension — never substitute a guess or an elevation reading.
 
+METHOD for reading the schedule accurately — follow exactly:
+1. FIRST transcribe the ENTIRE schedule table verbatim, one row per line, in order, before writing any JSON. Format each row as: REF | LOCATION | STRUCTURAL OPENING (copy the cell character-for-character) | (other columns). This forces you to read each row on its own line.
+2. THEN build the JSON from your transcription, taking each opening's ref, location and dimensions from the SAME transcribed row. Never take a dimension from a different row than its ref.
+3. The number of window objects MUST equal the number of window rows you transcribed (same for doors). If they differ, re-read.
+4. Sanity-check every width: a standard house window is rarely wider than ~2600mm. If you have written a width like 2085, 2100 or 4285 for a ref, RE-READ that cell — a 3-digit width (885, 910, 460) is easy to misread as a 4-digit one. Copy the digits exactly.
+
 STEP 2 — IF THERE IS NO SCHEDULE TABLE (or it omits some openings), read every external opening from the ELEVATIONS, SECTIONS and FLOOR PLANS together. Most house drawings have NO window schedule, so this path must always return openings whenever any are drawn — never come back empty when openings are visible. Cross-reference the three drawing types:
 
 ELEVATIONS — primary source for WIDTH, and to find and count every opening:
@@ -638,7 +672,8 @@ Count carefully — a typical house has one kitchen, sometimes a utility, and se
 
 IMPORTANT — do your absolute best to extract sizes:
 - Even if dimensions are small or partially obscured, make your best read
-- If a dimension is unclear, use the most common size for that opening type
+- When reading a SCHEDULE: if a cell is unclear, return null for that dimension — do NOT substitute a typical size. A wrong number is worse than a null the QS can fill in.
+- Only when MEASURING elevations with NO schedule may you fall back to a typical size if a dimension is genuinely unreadable.
 - Typical UK residential: external doors 900-1023mm wide x 2100mm high
 - Typical windows: 600-1810mm wide x 900-1200mm high
 - Bi-fold doors: 1800-3600mm wide x 2100mm high
@@ -694,7 +729,12 @@ Rules:
     }
   }
   if (raw === null) throw lastErr;
-  try { return JSON.parse(raw); } catch(e) { return null; }
+  try { return JSON.parse(raw); }
+  catch(e) {
+    const s = raw.indexOf('{'), epos = raw.lastIndexOf('}');
+    if (s >= 0 && epos > s) { try { return JSON.parse(raw.slice(s, epos + 1)); } catch(e2) {} }
+    return null;
+  }
 }
 
 
