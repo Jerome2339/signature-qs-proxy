@@ -112,9 +112,19 @@ async function parseVectorPDF(buffer) {
       const struct = (bands.sort((a, b) => b.mh - a.mh)[0] || { g: [] }).g;
       doors = sched.sort((a, b) => a[ax] - b[ax]).map(r => {
         const m = struct.filter(d => Math.abs(d[ax] - r[ax]) <= 4).sort((a, b) => Math.abs(a[ax] - r[ax]) - Math.abs(b[ax] - r[ax]))[0];
+        const colText = dTbl.filter(i => Math.abs(i[ax] - r[ax]) <= 4).map(i => i.str).join(' ').toLowerCase();
         let ty = findType(r, ax, dTbl, /bi-?fold|sliding|french/i, 'bifold', 'single');
         if (ty === 'single' && m && m.w >= 1500) ty = 'bifold';
-        return { ref: r.str, location: findLocation(r, ax, cr, dTbl), w: m ? m.w : null, h: m ? m.h : null, type: ty };
+        const loc = findLocation(r, ax, cr, dTbl) || '';
+        const h = m ? m.h : null;
+        // Fire-door flag wins (e.g. integral-garage door noted FD30) -> internal joinery
+        const fireDoor = /\bfd\s?30\b|\bfd\s?60\b|\bfire\b/.test(colText);
+        // External: head height >= 2100, bi-fold, garage (no fire note), or an external note keyword
+        const external = !fireDoor && (
+          (h && h >= 2100) || ty === 'bifold' || /garage/.test(loc) ||
+          /bi-?fold|sliding|french|level threshold|patio|external/.test(colText)
+        );
+        return { ref: r.str, location: loc, w: m ? m.w : null, h, type: ty, external, fireDoor };
       }).sort((a, b) => a.ref.localeCompare(b.ref, undefined, { numeric: true }));
     }
 
@@ -151,6 +161,9 @@ async function parseVectorPDF(buffer) {
         width_m: d.w ? d.w / 1000 : null,
         height_m: d.h ? d.h / 1000 : 2.1,
         qty: 1,
+        external: !!d.external,
+        fireDoor: !!d.fireDoor,
+        location: d.location || '',
       })),
       ...windows.map(w => ({
         label: `${w.ref || 'Window'} — ${w.location || ''}${w.type === 'bay' ? ' (Bay)' : ''}`,
@@ -158,6 +171,9 @@ async function parseVectorPDF(buffer) {
         width_m: w.w ? w.w / 1000 : null,
         height_m: w.h ? w.h / 1000 : 1.05,
         qty: 1,
+        external: true,
+        fireDoor: false,
+        location: w.location || '',
       })),
     ].filter(o => o.width_m);
 
