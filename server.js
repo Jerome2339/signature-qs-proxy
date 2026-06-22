@@ -82,20 +82,44 @@ function anthropicStream(body) {
   });
 }
 
+// Supabase sits behind Cloudflare; undici (global fetch) premature-closes reading its
+// response bodies on this host. Route Supabase calls through the built-in https module.
+function httpsRequest(urlString, { method = 'GET', headers = {}, body = null } = {}) {
+  const httpsLib = require('https');
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlString);
+    const opts = { hostname: u.hostname, path: u.pathname + u.search, method, headers: { ...headers } };
+    if (body != null) opts.headers['Content-Length'] = Buffer.byteLength(body);
+    const req = httpsLib.request(opts, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', d => { data += d; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: data }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('Supabase request timeout (30s)')));
+    if (body != null) req.write(body);
+    req.end();
+  });
+}
+
 async function supabaseInsert(record) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/usage_log`, {
-    method: 'POST',
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
-    },
-    body: JSON.stringify(record)
-  });
-  if (!r.ok) { console.error('Supabase insert failed:', r.status, await r.text()); return null; }
-  return await r.json();
+  try {
+    const r = await httpsRequest(`${SUPABASE_URL}/rest/v1/usage_log`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(record)
+    });
+    if (r.status < 200 || r.status >= 300) { console.error('Supabase insert failed:', r.status, r.text.slice(0, 200)); return null; }
+    try { return JSON.parse(r.text); } catch (e) { return null; }
+  } catch (e) { console.error('Supabase insert error:', e.message); return null; }
 }
 
 // Helper: count records for current month
@@ -106,12 +130,12 @@ async function supabaseMonthCount(client, branch) {
   const url = `${SUPABASE_URL}/rest/v1/usage_log?ts=gte.${monthStart}`
     + (client ? `&client=eq.${encodeURIComponent(client)}` : '')
     + (branch ? `&branch=eq.${encodeURIComponent(branch)}` : '');
-  const r = await fetch(url, {
+  const r = await httpsRequest(url, {
     method: 'GET',
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Prefer': 'count=exact', 'Range': '0-0' }
-  });
-  if (!r.ok) return 0;
-  const cr = r.headers.get('content-range'); // format: 0-0/N
+  }).catch(() => null);
+  if (!r || r.status < 200 || r.status >= 300) return 0;
+  const cr = r.headers['content-range']; // format: 0-0/N
   if (cr && cr.includes('/')) return parseInt(cr.split('/')[1]) || 0;
   return 0;
 }
@@ -123,12 +147,12 @@ async function supabaseMonthRecords(monthOffset) {
   const start = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1).toISOString();
   const end = new Date(now.getFullYear(), now.getMonth() + monthOffset + 1, 1).toISOString();
   const url = `${SUPABASE_URL}/rest/v1/usage_log?ts=gte.${start}&ts=lt.${end}&order=ts.asc`;
-  const r = await fetch(url, {
+  const r = await httpsRequest(url, {
     method: 'GET',
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
-  });
-  if (!r.ok) return [];
-  return await r.json();
+  }).catch(() => null);
+  if (!r || r.status < 200 || r.status >= 300) return [];
+  try { return JSON.parse(r.text); } catch (e) { return []; }
 }
 const GOOGLE_SA_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY; // JSON string of service account key
 const DOCAI_PROCESSOR = 'https://eu-documentai.googleapis.com/v1/projects/843787881834/locations/eu/processors/b39e11de77cfc99e/processorVersions/pretrained-foundation-model-v1.5-pro-2025-06-20:process';
@@ -137,7 +161,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.11.1', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.11.2', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -895,18 +919,20 @@ app.get('/monthly-summary', async (req, res) => {
 // ── KITCHEN/BATHROOM LEAD CAPTURE ─────────────────────────────────────────
 async function supabaseInsertLead(record) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
-    method: 'POST',
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
-    },
-    body: JSON.stringify(record)
-  });
-  if (!r.ok) { console.error('Supabase lead insert failed:', r.status, await r.text()); return null; }
-  return await r.json();
+  try {
+    const r = await httpsRequest(`${SUPABASE_URL}/rest/v1/leads`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(record)
+    });
+    if (r.status < 200 || r.status >= 300) { console.error('Supabase lead insert failed:', r.status, r.text.slice(0, 200)); return null; }
+    try { return JSON.parse(r.text); } catch (e) { return null; }
+  } catch (e) { console.error('Supabase lead insert error:', e.message); return null; }
 }
 
 app.post('/log-lead', async (req, res) => {
