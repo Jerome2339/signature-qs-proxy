@@ -20,6 +20,16 @@ const RESEND_KEY = process.env.RESEND_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;       // e.g. https://xxxx.supabase.co
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role key (server-side only)
 
+// ── COST TRACKING + PER-BRANCH CAP (env-overridable) ──────────────────────
+// Per-branch monthly cap on drawing analyses (guards against runaway AI spend / abuse).
+// Set well above expected use (~4/mo). 0 disables the cap.
+const BRANCH_MONTHLY_CAP = parseInt(process.env.BRANCH_MONTHLY_CAP || '50', 10);
+// Unit costs used only to estimate cost-per-lookup. Set to current rates.
+// Anthropic Claude (Sonnet) USD per 1M tokens; Google Document AI USD per page.
+const PRICE_IN_PER_MTOK  = parseFloat(process.env.PRICE_IN_PER_MTOK  || '3');   // input  $/1M tok
+const PRICE_OUT_PER_MTOK = parseFloat(process.env.PRICE_OUT_PER_MTOK || '15');  // output $/1M tok
+const DOCAI_PRICE_PER_PAGE = parseFloat(process.env.DOCAI_PRICE_PER_PAGE || '0.03'); // $/page
+
 // Helper: insert a usage record into Supabase
 try {
   const { setGlobalDispatcher, Agent } = require('undici');
@@ -32,7 +42,7 @@ try {
 // "Premature close". Streaming keeps bytes flowing continuously and defeats that.
 // undici (Node's global fetch) premature-closes reading Cloudflare-fronted response bodies
 // on this instance. The built-in https module uses a different HTTP stack and gets through.
-function anthropicStream(body) {
+function anthropicStream(body, usageOut) {
   const https = require('https');
   const payload = JSON.stringify({ ...body, stream: true });
   return new Promise((resolve, reject) => {
@@ -69,6 +79,8 @@ function anthropicStream(body) {
           try {
             const evt = JSON.parse(p);
             if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) text += evt.delta.text;
+            else if (usageOut && evt.type === 'message_start' && evt.message && evt.message.usage) { usageOut.in_tokens = evt.message.usage.input_tokens || 0; usageOut.model = evt.message.model || (body && body.model) || ''; }
+            else if (usageOut && evt.type === 'message_delta' && evt.usage) { usageOut.out_tokens = evt.usage.output_tokens || usageOut.out_tokens || 0; }
           } catch (e) { /* ignore keep-alive / non-JSON lines */ }
         }
       });
@@ -122,12 +134,26 @@ async function supabaseInsert(record) {
   } catch (e) { console.error('Supabase insert error:', e.message); return null; }
 }
 
+// Insert a per-lookup cost record into the cost_log table (non-fatal if it fails).
+async function costLogInsert(record) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return null;
+  try {
+    const r = await httpsRequest(`${SUPABASE_URL}/rest/v1/cost_log`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify(record)
+    });
+    if (r.status < 200 || r.status >= 300) console.error('cost_log insert failed:', r.status, r.text.slice(0,160));
+  } catch (e) { console.error('cost_log insert error:', e.message); }
+}
+
 // Helper: count records for current month
-async function supabaseMonthCount(client, branch) {
+async function supabaseMonthCount(client, branch, table) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return 0;
+  const tbl = table || 'usage_log';
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const url = `${SUPABASE_URL}/rest/v1/usage_log?ts=gte.${monthStart}`
+  const url = `${SUPABASE_URL}/rest/v1/${tbl}?ts=gte.${monthStart}`
     + (client ? `&client=eq.${encodeURIComponent(client)}` : '')
     + (branch ? `&branch=eq.${encodeURIComponent(branch)}` : '');
   const r = await httpsRequest(url, {
@@ -141,12 +167,13 @@ async function supabaseMonthCount(client, branch) {
 }
 
 // Helper: fetch records for a given month offset (0 = this month, -1 = last month)
-async function supabaseMonthRecords(monthOffset) {
+async function supabaseMonthRecords(monthOffset, table) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+  const tbl = table || 'usage_log';
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1).toISOString();
   const end = new Date(now.getFullYear(), now.getMonth() + monthOffset + 1, 1).toISOString();
-  const url = `${SUPABASE_URL}/rest/v1/usage_log?ts=gte.${start}&ts=lt.${end}&order=ts.asc`;
+  const url = `${SUPABASE_URL}/rest/v1/${tbl}?ts=gte.${start}&ts=lt.${end}&order=ts.asc`;
   const r = await httpsRequest(url, {
     method: 'GET',
     headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
@@ -161,7 +188,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.11.2', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.12.0', docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -254,6 +281,20 @@ const { parseVectorPDF } = require('./vectorParse');
 app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
 
+  // Per-branch monthly cap — guards against runaway AI spend / abuse. Skipped if no branch sent.
+  const reqBranch = (req.body && req.body.branch) || '';
+  const reqClient = (req.body && req.body.client) || '';
+  if (BRANCH_MONTHLY_CAP > 0 && reqBranch) {
+    const used = await supabaseMonthCount(reqClient, reqBranch, 'cost_log').catch(() => 0);
+    if (used >= BRANCH_MONTHLY_CAP) {
+      console.warn(`Branch ${reqBranch} hit monthly cap (${used}/${BRANCH_MONTHLY_CAP})`);
+      return res.status(429).json({ error: 'monthly_limit', message: `This branch has reached its monthly limit of ${BRANCH_MONTHLY_CAP} estimates. Please contact your administrator.` });
+    }
+  }
+  const _costT0 = Date.now();
+  let docaiPages = 0;
+  const aiUsage = {};
+
   // If no Google key, fall back to Claude
   if (!GOOGLE_SA_KEY) {
     console.log('No Google SA key — falling back to Claude');
@@ -289,6 +330,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         }
       }
       if (docaiData) {
+        try { docaiPages += (docaiData.document && Array.isArray(docaiData.document.pages)) ? docaiData.document.pages.length : 1; } catch (e) {}
         results.push({ file: file.originalname, data: docaiData });
       } else {
         console.error(`Document AI gave up on ${file.originalname} after 3 attempts — will fall back to Claude`);
@@ -334,7 +376,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
     if (!vectorUsed && ANTHROPIC_KEY && req.files.length > 0) {
       try {
         console.log('Running schedule extraction pass with Claude...');
-        const scheduleData = await extractSchedulesWithClaude(req.files);
+        const scheduleData = await extractSchedulesWithClaude(req.files, aiUsage);
         if (scheduleData && (scheduleData.doors?.length > 0 || scheduleData.windows?.length > 0)) {
           const doors = scheduleData.doors || [];
           const windows = scheduleData.windows || [];
@@ -370,6 +412,21 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         console.warn('Schedule extraction failed (non-critical):', err.message);
       }
     }
+
+    // Cost tracking (non-fatal): record what this lookup actually cost to run.
+    try {
+      const inTok = aiUsage.in_tokens || 0, outTok = aiUsage.out_tokens || 0;
+      const aiCost = (inTok / 1e6) * PRICE_IN_PER_MTOK + (outTok / 1e6) * PRICE_OUT_PER_MTOK;
+      const docaiCost = docaiPages * DOCAI_PRICE_PER_PAGE;
+      await costLogInsert({
+        ts: new Date().toISOString(),
+        branch: reqBranch || null, client: reqClient || null,
+        parse_path: vectorUsed ? 'vector' : 'claude',
+        docai_pages: docaiPages, ai_in_tokens: inTok, ai_out_tokens: outTok,
+        ai_cost: +aiCost.toFixed(4), docai_cost: +docaiCost.toFixed(4),
+        total_cost: +(aiCost + docaiCost).toFixed(4), ms: Date.now() - _costT0,
+      });
+    } catch (e) { console.warn('cost log skipped:', e.message); }
 
     res.json({ success: true, data: merged, source: vectorUsed ? 'vector-pdf + google-document-ai' : 'google-document-ai' });
 
@@ -627,7 +684,7 @@ KEY RULES:
 
 
 // ── CLAUDE SCHEDULE EXTRACTION ────────────────────────────────────────────
-async function extractSchedulesWithClaude(files) {
+async function extractSchedulesWithClaude(files, usageOut) {
   const fileParts = files.map(file => {
     const b64 = file.buffer.toString('base64');
     const isPDF = file.mimetype.includes('pdf') || file.originalname.toLowerCase().endsWith('.pdf');
@@ -743,7 +800,7 @@ Rules:
   let raw = null, lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const txt = await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] });
+      const txt = await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] }, usageOut);
       raw = txt.replace(/```json|```/g, '').trim();
       break;
     } catch (e) {
@@ -874,6 +931,36 @@ app.get('/usage-count', async (req, res) => {
     res.json({ monthCount });
   } catch(err) {
     res.json({ monthCount: 0 });
+  }
+});
+
+// Cost summary — true cost-per-lookup from the cost_log. ?month=0 (this month) or -1 (last).
+app.get('/cost-summary', async (req, res) => {
+  try {
+    const offset = parseInt(req.query.month || '0', 10);
+    const rows = await supabaseMonthRecords(offset, 'cost_log');
+    const n = rows.length;
+    const sum = k => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+    const totalCost = sum('total_cost'), aiCost = sum('ai_cost'), docaiCost = sum('docai_cost');
+    const vector = rows.filter(r => r.parse_path === 'vector').length;
+    const claude = rows.filter(r => r.parse_path === 'claude').length;
+    // per-branch breakdown
+    const byBranch = {};
+    rows.forEach(r => { const b = r.branch || '—'; (byBranch[b] = byBranch[b] || { n: 0, cost: 0 }); byBranch[b].n++; byBranch[b].cost += Number(r.total_cost) || 0; });
+    res.json({
+      month_offset: offset,
+      lookups: n,
+      avg_cost_per_lookup: n ? +(totalCost / n).toFixed(4) : 0,
+      total_cost: +totalCost.toFixed(2),
+      ai_cost: +aiCost.toFixed(2),
+      docai_cost: +docaiCost.toFixed(2),
+      vector_lookups: vector,
+      claude_lookups: claude,
+      note: 'Costs are estimates using configured unit rates (USD). Token counts and page counts are exact.',
+      by_branch: Object.keys(byBranch).sort().map(b => ({ branch: b, lookups: byBranch[b].n, cost: +byBranch[b].cost.toFixed(2) })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
