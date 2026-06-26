@@ -30,6 +30,11 @@ const PRICE_IN_PER_MTOK  = parseFloat(process.env.PRICE_IN_PER_MTOK  || '3');   
 const PRICE_OUT_PER_MTOK = parseFloat(process.env.PRICE_OUT_PER_MTOK || '15');  // output $/1M tok
 const DOCAI_PRICE_PER_PAGE = parseFloat(process.env.DOCAI_PRICE_PER_PAGE || '0.03'); // $/page
 
+// ── SANDBOX MODE (set SANDBOX_MODE=true only on the evaluation deployment) ──
+// Runs the same code against a separate database, with a hard total trial cap.
+const SANDBOX_MODE = process.env.SANDBOX_MODE === 'true';
+const SANDBOX_TOTAL_CAP = parseInt(process.env.SANDBOX_TOTAL_CAP || '25', 10);
+
 // Helper: insert a usage record into Supabase
 try {
   const { setGlobalDispatcher, Agent } = require('undici');
@@ -147,6 +152,20 @@ async function costLogInsert(record) {
   } catch (e) { console.error('cost_log insert error:', e.message); }
 }
 
+// All-time row count for a table (used by the sandbox trial cap).
+async function supabaseTotalCount(table) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return 0;
+  const tbl = table || 'cost_log';
+  const r = await httpsRequest(`${SUPABASE_URL}/rest/v1/${tbl}?select=id`, {
+    method: 'GET',
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Prefer': 'count=exact', 'Range': '0-0' }
+  }).catch(() => null);
+  if (!r || r.status < 200 || r.status >= 300) return 0;
+  const cr = r.headers['content-range'];
+  if (cr && cr.includes('/')) return parseInt(cr.split('/')[1]) || 0;
+  return 0;
+}
+
 // Helper: count records for current month
 async function supabaseMonthCount(client, branch, table) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return 0;
@@ -188,7 +207,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.12.0', docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.13.0', sandbox: SANDBOX_MODE, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -280,6 +299,14 @@ const { parseVectorPDF } = require('./vectorParse');
 
 app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
+
+  // Sandbox trial cap — hard total limit on the evaluation deployment.
+  if (SANDBOX_MODE) {
+    const total = await supabaseTotalCount('cost_log').catch(() => 0);
+    if (total >= SANDBOX_TOTAL_CAP) {
+      return res.status(429).json({ error: 'sandbox_limit', message: `This sandbox has reached its trial limit of ${SANDBOX_TOTAL_CAP} estimates. Please contact Signature to extend the trial.` });
+    }
+  }
 
   // Per-branch monthly cap — guards against runaway AI spend / abuse. Skipped if no branch sent.
   const reqBranch = (req.body && req.body.branch) || '';
