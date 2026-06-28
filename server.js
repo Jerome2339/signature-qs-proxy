@@ -35,6 +35,14 @@ const DOCAI_PRICE_PER_PAGE = parseFloat(process.env.DOCAI_PRICE_PER_PAGE || '0.0
 const SANDBOX_MODE = process.env.SANDBOX_MODE === 'true';
 const SANDBOX_TOTAL_CAP = parseInt(process.env.SANDBOX_TOTAL_CAP || '25', 10);
 
+// ── RASTER SCHEDULE ENGINE (variant A vs B for benchmarking) ───────────────
+// 'standard' = current behaviour (Sonnet 4.5, 4k tokens).
+// 'vision'   = pushed harder: stronger model + bigger output budget (avoids
+//              truncating long schedules). Both fully env-overridable.
+const SCHEDULE_ENGINE = (process.env.SCHEDULE_ENGINE || 'standard').toLowerCase();
+const SCHEDULE_MODEL = process.env.SCHEDULE_MODEL || (SCHEDULE_ENGINE === 'vision' ? 'claude-sonnet-4-6' : 'claude-sonnet-4-5');
+const SCHEDULE_MAX_TOKENS = parseInt(process.env.SCHEDULE_MAX_TOKENS || (SCHEDULE_ENGINE === 'vision' ? '8000' : '4000'), 10);
+
 // Helper: insert a usage record into Supabase
 try {
   const { setGlobalDispatcher, Agent } = require('undici');
@@ -207,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.13.0', sandbox: SANDBOX_MODE, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.14.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -827,7 +835,7 @@ Rules:
   let raw = null, lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const txt = await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 4000, messages: [{ role: 'user', content: fileParts }] }, usageOut);
+      const txt = await anthropicStream({ model: SCHEDULE_MODEL, max_tokens: SCHEDULE_MAX_TOKENS, messages: [{ role: 'user', content: fileParts }] }, usageOut);
       raw = txt.replace(/```json|```/g, '').trim();
       break;
     } catch (e) {
