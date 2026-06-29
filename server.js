@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.15.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.16.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -465,6 +465,42 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
       }
     }
 
+    // ── ROUTE C — width correction (runs on EVERY path, vector or raster) ──────
+    // The width sometimes comes through as the roof span (e.g. 8323) not the footprint
+    // width (e.g. 6565). If it failed the GIFA sanity check, fire a focused floor-plan
+    // read to get the true width, validate it, and recompute the wall geometry. Only
+    // fires when suspect — clean drawings stay on the free path.
+    try {
+      const G = merged._geom;
+      if (G && G.widthSuspect && ANTHROPIC_KEY && req.files && req.files.length) {
+        console.log(`Width ${G.widthMm}mm failed GIFA sanity — firing floor-plan dimension read…`);
+        const fp = await readFloorPlanDimensions(req.files);
+        const gfW = fp && fp.ground_floor_width_mm ? parseFloat(fp.ground_floor_width_mm) : null;
+        const gfL = fp && fp.ground_floor_length_mm ? parseFloat(fp.ground_floor_length_mm) : null;
+        const ffW = fp && fp.first_floor_width_mm ? parseFloat(fp.first_floor_width_mm) : null;
+        // accept the floor-plan width only if it is plausible against GIFA (i.e. it is
+        // NOT itself the span). Same threshold used to flag it suspect.
+        const impliedExtW = G.groundArea && G.lengthMm ? (G.groundArea / (G.lengthMm / 1000)) * 1000 + 600 : null;
+        const plausible = gfW && gfW > 2000 && (!impliedExtW || gfW <= impliedExtW + 1500);
+        if (plausible) {
+          const newGeom = computeWallGeometry({ ...G, widthMm: gfW });
+          merged.floor.width_m = gfW / 1000;
+          merged.walls = newGeom.walls;
+          merged.roof.span_m = gfW / 1000;
+          merged.missing = (merged.missing || []).filter(x => !/may be the ROOF SPAN/.test(x));
+          merged.notes = merged.notes || [];
+          merged.notes.push(`Building width corrected to ${(gfW/1000).toFixed(3)}m from the floor-plan read (extracted ${(G.widthMm/1000).toFixed(3)}m looked like the roof span).`);
+          merged.extra = merged.extra || {};
+          merged.extra.width_correction = { from_mm: G.widthMm, to_mm: gfW, ground_first: { gfL, gfW, ffW }, source_note: fp.source_note || null };
+          if (ffW && Math.abs(ffW - gfW) > 150) merged.notes.push(`First-floor width (${ffW}) differs from ground (${gfW}) — likely a bay/projection; ground floor governs the footprint.`);
+          console.log(`Width corrected: ${G.widthMm} → ${gfW} mm (floor-plan read; GF ${gfL}x${gfW}, FF width ${ffW||'?'})`);
+        } else {
+          console.log(`Floor-plan read did not yield a usable width (got ${gfW||'null'}) — keeping flag for manual confirmation.`);
+        }
+      }
+      if (merged._geom) delete merged._geom; // keep response payload clean
+    } catch (e) { console.warn('Width correction skipped (non-critical):', e.message); }
+
     // Cost tracking (non-fatal): record what this lookup actually cost to run.
     try {
       const inTok = aiUsage.in_tokens || 0, outTok = aiUsage.out_tokens || 0;
@@ -550,23 +586,13 @@ function mergeDocAIResults(results) {
     (ceilGroundMm && ceilFirstMm ? ceilGroundMm + ceilFirstMm + 300 : // +300mm for floor structure
      ceilGroundMm ? ceilGroundMm : 2400);
 
-  // Gable (side) wall length: the gable walls sit BETWEEN the front & rear walls,
-  // so their run is the overall width LESS the two end-wall build-ups — this is the
-  // figure dimensioned on the substructure/ground-floor plan (e.g. 6565), NOT the
-  // overall width / roof span (e.g. 8323). Using overall width double-counts corners
-  // and overstates both the wall and the gable triangle. Prefer a measured side run
-  // if the extractor captured one; else corner-correct the overall width.
   const sideRunMm = getNum('side_wall_length_mm') || getNum('gable_wall_length_mm');
-  const wallBuildupMm = (getNum('wall_outer_leaf_mm') || 102) + (getNum('wall_cavity_mm') || 100) + (getNum('wall_inner_leaf_mm') || 100); // ~302mm
-  const gableLenMm = sideRunMm || (widthMm ? widthMm - 2 * wallBuildupMm : null);
-
-  // Gable triangle sits ON TOP of the gable wall, so its base = the gable wall length
-  // (gableLenMm), not the overall span. Ridge height = (half base) x tan(pitch).
+  const wallBuildupMm = (getNum('wall_outer_leaf_mm') || 102) + (getNum('wall_cavity_mm') || 100) + (getNum('wall_inner_leaf_mm') || 100);
   const pitchDeg = getNum('roof_pitch_degrees') || 35;
-  const pitchRad = pitchDeg * Math.PI / 180;
-  const gableBaseMm = gableLenMm || widthMm || lengthMm || 0;
-  const ridgeHeightMm = (gableBaseMm / 2) * Math.tan(pitchRad);
-  const gableAreaM2 = gableBaseMm ? 2 * 0.5 * (gableBaseMm / 1000) * (ridgeHeightMm / 1000) : 0;
+  // Build wall geometry via the shared helper (same path used after a width correction).
+  const _geomCalc = computeWallGeometry({ lengthMm, widthMm, extWallHeightMm, pitchDeg, wallBuildupMm, sideRunMm });
+  const gableLenMm = _geomCalc.gableLenMm;
+  const gableAreaM2 = _geomCalc.gableAreaM2;
   const roofPitch = getNum('roof_pitch_degrees');
   const wallOuterMm = getNum('wall_outer_leaf_mm');
   const wallCavityMm = getNum('wall_cavity_mm');
@@ -586,6 +612,9 @@ function mergeDocAIResults(results) {
   return {
     project_name: getStr('project_name'),
     drawing_type: ['floor plan', 'elevation', 'section', 'schedule'],
+    // Route C: geometry inputs, so the handler can recompute walls if the width is
+    // corrected from a floor-plan read. Stripped from the response before sending.
+    _geom: { lengthMm, widthMm, extWallHeightMm, pitchDeg, wallBuildupMm, sideRunMm, widthSuspect, groundArea: gifaForWidth },
 
     floor: {
       length_m: lengthMm ? lengthMm / 1000 : null,
@@ -595,12 +624,7 @@ function mergeDocAIResults(results) {
       ext_wall_height_m: extWallHeightMm ? extWallHeightMm / 1000 : null,
     },
 
-    walls: lengthMm && widthMm ? [
-      { label: 'Front wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
-      { label: 'Rear wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
-      { label: 'Left gable wall', length_m: (gableLenMm || widthMm) / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
-      { label: 'Right gable wall', length_m: (gableLenMm || widthMm) / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
-    ] : [],
+    walls: _geomCalc.walls,
 
     openings: [], // Door/window schedule extraction added once foundation model tested
 
@@ -661,6 +685,63 @@ function mergeDocAIResults(results) {
 }
 
 // ── CLAUDE FALLBACK ────────────────────────────────────────────────────────
+// Pure wall-geometry builder — used by mergeDocAIResults AND when a suspect width is
+// corrected from the floor-plan read, so both produce identical geometry.
+// Method (standard QS take-off, validated against hand calc): external perimeter =
+// 2(L + W) using the drawn OUTER dimensions; the side/gable wall length IS the drawn
+// width (e.g. 6565), NOT width minus wall thicknesses. The gable triangle sits on the
+// gable wall, so its base = that same width.
+function computeWallGeometry(g) {
+  const lengthMm = g.lengthMm, widthMm = g.widthMm, extWallHeightMm = g.extWallHeightMm;
+  const pitchDeg = g.pitchDeg || 35;
+  const gableLenMm = g.sideRunMm || widthMm || null; // drawn side dimension, used directly
+  const pitchRad = pitchDeg * Math.PI / 180;
+  const gableBaseMm = gableLenMm || lengthMm || 0;
+  const ridgeHeightMm = (gableBaseMm / 2) * Math.tan(pitchRad);
+  const gableAreaM2 = gableBaseMm ? 2 * 0.5 * (gableBaseMm / 1000) * (ridgeHeightMm / 1000) : 0;
+  const walls = (lengthMm && widthMm) ? [
+    { label: 'Front wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
+    { label: 'Rear wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
+    { label: 'Left gable wall', length_m: gableLenMm / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
+    { label: 'Right gable wall', length_m: gableLenMm / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
+  ] : [];
+  return { walls, gableAreaM2, gableLenMm };
+}
+
+// ROUTE C — targeted floor-plan dimension read. Only fired when the cheap path
+// (DocAI/vector) produced a width that fails the GIFA sanity check (i.e. it looks
+// like the roof span, not the footprint). Reads ONLY the overall dimensions off the
+// FLOOR PLANS via a focused Claude vision call. Cheap, and only on suspect drawings.
+async function readFloorPlanDimensions(files) {
+  if (!ANTHROPIC_KEY || !files || !files.length) return null;
+  const fileParts = files.map(file => {
+    const b64 = file.buffer.toString('base64');
+    const ext = (file.originalname || '').split('.').pop().toLowerCase();
+    const isPDF = (file.mimetype || '').includes('pdf') || ext === 'pdf';
+    if (isPDF) return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } };
+    return { type: 'image', source: { type: 'base64', media_type: file.mimetype, data: b64 } };
+  });
+  fileParts.push({ type: 'text', text: `You are a senior UK quantity surveyor. Read ONLY the building's overall EXTERNAL dimensions, taken from the OUTERMOST dimension bar on the FLOOR PLANS.
+Rules:
+- The GROUND FLOOR PLAN is the governing footprint: the longest outer dimension = length, the shorter outer dimension = width.
+- Also read the FIRST FLOOR PLAN outer dimensions as a cross-check.
+- NEVER take these from the ROOF PLAN (that is the roof SPAN, not the footprint), the SECTION, or the SUBSTRUCTURE/FOUNDATION plan.
+- Ground and first should normally match; a small difference is usually a bay window — note it.
+- Read exactly as printed, in millimetres. Do not scale or estimate. If genuinely unreadable, use null.
+Return ONLY this JSON, no markdown, no commentary:
+{"ground_floor_length_mm":null,"ground_floor_width_mm":null,"first_floor_length_mm":null,"first_floor_width_mm":null,"source_note":null}` });
+  try {
+    const raw = (await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 500, messages: [{ role: 'user', content: fileParts }] }))
+      .replace(/```json|```/g, '').trim();
+    const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
+    if (s < 0 || e <= s) return null;
+    return JSON.parse(raw.slice(s, e + 1));
+  } catch (err) {
+    console.warn('Floor-plan dimension read failed (non-critical):', err.message);
+    return null;
+  }
+}
+
 async function analyseWithClaude(req, res) {
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'No API keys configured' });
 
