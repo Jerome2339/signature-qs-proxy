@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.14.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.15.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -435,6 +435,23 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
           merged.extra.window_count = windows.length;
           console.log(`Schedule extraction: ${doors.length} doors, ${windows.length} windows`);
         }
+        // STAGED (inspection only — does NOT yet drive the take-off): surface the
+        // floor-plan dimensions Claude read, so we can verify against the drawing
+        // before letting them override the DocAI width. Compare ground vs first as a
+        // sanity cross-check; compare ground vs the DocAI width to expose the span error.
+        if (scheduleData && scheduleData.overall_dimensions) {
+          const od = scheduleData.overall_dimensions;
+          merged.extra.floorplan_dimensions = od;
+          const gW = od.ground_floor_width_mm, gL = od.ground_floor_length_mm;
+          const fW = od.first_floor_width_mm, fL = od.first_floor_length_mm;
+          const docaiW = merged.floor && merged.floor.width_m ? Math.round(merged.floor.width_m*1000) : null;
+          const notes = [];
+          if (gW && fW && Math.abs(gW - fW) > 150) notes.push(`ground/first width differ (${gW} vs ${fW}) — likely bay/projection`);
+          if (gL && fL && Math.abs(gL - fL) > 150) notes.push(`ground/first length differ (${gL} vs ${fL}) — likely bay/projection`);
+          if (gW && docaiW && Math.abs(gW - docaiW) > 300) notes.push(`floor-plan width (${gW}) disagrees with DocAI width (${docaiW}) — DocAI value may be the roof span; floor plan is authoritative`);
+          merged.extra.floorplan_dimensions_check = notes.length ? notes : ['floor-plan dimensions read; consistent'];
+          console.log(`Floor-plan dimensions (inspection): GF ${gL}x${gW}, FF ${fL}x${fW} | ${notes.join(' | ')||'consistent'}`);
+        }
         // Room schedule — merge in whenever the pass returns rooms (independent of door/window result)
         if (scheduleData && Array.isArray(scheduleData.rooms) && scheduleData.rooms.length > 0) {
           merged.extra.rooms = normaliseRooms(scheduleData.rooms);
@@ -509,7 +526,21 @@ function mergeDocAIResults(results) {
   const firstArea = getNum('floor_area_first_m2');
   const totalArea = getNum('floor_area_total_m2');
   const lengthMm = getNum('overall_length_mm');
-  const widthMm = getNum('overall_width_mm');
+  const rawWidthMm = getNum('overall_width_mm');
+  // WIDTH SANITY CHECK — the extractor sometimes tags the ROOF SPAN as the building
+  // width (e.g. 8323 span instead of the 6565 substructure-plan width). Cross-check
+  // against ground-floor GIFA: a gable roof spans the building width, so a "width"
+  // much larger than GIFA/length implies is almost certainly the span. We do NOT try
+  // to reconstruct the exact width from GIFA (that under-reads on non-rectangular
+  // footprints); instead we keep the value but FLAG it loudly so the surveyor confirms
+  // the side dimension from the plan's outer dimension bar before the take-off is trusted.
+  const widthMm = rawWidthMm;
+  let widthSuspect = false;
+  const gifaForWidth = groundArea || (totalArea ? totalArea / 2 : null);
+  if (lengthMm && gifaForWidth && rawWidthMm) {
+    const impliedExternalWidthMm = (gifaForWidth / (lengthMm / 1000)) * 1000 + 600;
+    if (rawWidthMm > impliedExternalWidthMm + 1500) widthSuspect = true;
+  }
   const ceilGroundMm = getNum('ceiling_height_ground_mm') || getNum('ceiling_height_gr');
   const ceilFirstMm = getNum('ceiling_height_first_mm') || getNum('ceiling_height_fir') || getNum('ceiling_height_fi');
   const overallHeightMm = getNum('overall_height_mm'); // full external wall height from DPC to eaves/ridge
@@ -519,14 +550,23 @@ function mergeDocAIResults(results) {
     (ceilGroundMm && ceilFirstMm ? ceilGroundMm + ceilFirstMm + 300 : // +300mm for floor structure
      ceilGroundMm ? ceilGroundMm : 2400);
 
-  // Gable triangle area for pitched roofs
-  // Ridge height = (half span) x tan(pitch)
-  // Gable area = 0.5 x width x ridge height x 2 gables
+  // Gable (side) wall length: the gable walls sit BETWEEN the front & rear walls,
+  // so their run is the overall width LESS the two end-wall build-ups — this is the
+  // figure dimensioned on the substructure/ground-floor plan (e.g. 6565), NOT the
+  // overall width / roof span (e.g. 8323). Using overall width double-counts corners
+  // and overstates both the wall and the gable triangle. Prefer a measured side run
+  // if the extractor captured one; else corner-correct the overall width.
+  const sideRunMm = getNum('side_wall_length_mm') || getNum('gable_wall_length_mm');
+  const wallBuildupMm = (getNum('wall_outer_leaf_mm') || 102) + (getNum('wall_cavity_mm') || 100) + (getNum('wall_inner_leaf_mm') || 100); // ~302mm
+  const gableLenMm = sideRunMm || (widthMm ? widthMm - 2 * wallBuildupMm : null);
+
+  // Gable triangle sits ON TOP of the gable wall, so its base = the gable wall length
+  // (gableLenMm), not the overall span. Ridge height = (half base) x tan(pitch).
   const pitchDeg = getNum('roof_pitch_degrees') || 35;
   const pitchRad = pitchDeg * Math.PI / 180;
-  const halfSpanMm = widthMm ? widthMm / 2 : (lengthMm ? lengthMm / 2 : 5000);
-  const ridgeHeightMm = halfSpanMm * Math.tan(pitchRad);
-  const gableAreaM2 = widthMm ? 2 * 0.5 * (widthMm / 1000) * (ridgeHeightMm / 1000) : 0;
+  const gableBaseMm = gableLenMm || widthMm || lengthMm || 0;
+  const ridgeHeightMm = (gableBaseMm / 2) * Math.tan(pitchRad);
+  const gableAreaM2 = gableBaseMm ? 2 * 0.5 * (gableBaseMm / 1000) * (ridgeHeightMm / 1000) : 0;
   const roofPitch = getNum('roof_pitch_degrees');
   const wallOuterMm = getNum('wall_outer_leaf_mm');
   const wallCavityMm = getNum('wall_cavity_mm');
@@ -535,6 +575,7 @@ function mergeDocAIResults(results) {
   const missing = [];
   if (!lengthMm) missing.push('Overall building length — enter manually in Dimensions tab');
   if (!widthMm) missing.push('Overall building width — enter manually in Dimensions tab');
+  if (widthSuspect) missing.push('⚠ Building width (' + (widthMm/1000).toFixed(3) + 'm) may be the ROOF SPAN, not the footprint width — it looks too large for the floor area. CONFIRM the side dimension from the substructure/ground-floor plan outer bar and correct in the Dimensions tab before relying on masonry quantities.');
   if (!roofPitch) missing.push('Roof pitch angle — enter manually in Spec & Roof tab');
 
   const notes = [];
@@ -557,8 +598,8 @@ function mergeDocAIResults(results) {
     walls: lengthMm && widthMm ? [
       { label: 'Front wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
       { label: 'Rear wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
-      { label: 'Left gable wall', length_m: widthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
-      { label: 'Right gable wall', length_m: widthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
+      { label: 'Left gable wall', length_m: (gableLenMm || widthMm) / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
+      { label: 'Right gable wall', length_m: (gableLenMm || widthMm) / 1000, height_m: extWallHeightMm / 1000, is_external: true, gable_area_m2: gableAreaM2 / 2 },
     ] : [],
 
     openings: [], // Door/window schedule extraction added once foundation model tested
@@ -639,6 +680,7 @@ async function analyseWithClaude(req, res) {
 {
   "project_name": null,
   "house_type": null,
+  "overall_dimensions": { "ground_floor_length_mm": null, "ground_floor_width_mm": null, "first_floor_length_mm": null, "first_floor_width_mm": null, "source_note": null },
   "floor_areas": { "ground_m2": null, "first_m2": null, "total_m2": null },
   "ceiling_heights": { "ground_floor_mm": null, "first_floor_mm": null },
   "roof": { "type": "pitched/flat", "pitch_degrees": null },
@@ -656,7 +698,13 @@ KEY RULES:
 - Roof pitch is the arc symbol at the eaves on section drawings (NOT staircase PITCH=41°)
 - Door/window schedules are tables — read every row
 - ROOMS: list every room labelled on the floor plans. For each, set "name" to the label as drawn (e.g. "En-suite 2") and "type" to ONE of: cloakroom, bathroom, ensuite, kitchen, utility, bedroom, living, dining, hall, garage, study, other. Classify any WC / W.C. / W/C / toilet / powder room as "cloakroom", any bath or shower room as "bathroom", en-suites as "ensuite", and laundry / utility rooms as "utility". Set "floor" to ground or first if known.
-- Do NOT attempt overall building dimensions — user will enter manually`
+- OVERALL BUILDING DIMENSIONS (length & width) — CRITICAL, read carefully:
+  * Take them ONLY from the OUTERMOST dimension bar on the FLOOR PLANS — this is the external envelope of the building (accepted drawing convention, and the only thing that can be built to).
+  * Read the GROUND FLOOR PLAN as the primary/governing footprint: the longest outer dimension string = length, the shorter outer dimension string = width. Put these in ground_floor_length_mm / ground_floor_width_mm.
+  * Read the FIRST FLOOR PLAN's outermost dimensions too as a cross-check, into first_floor_length_mm / first_floor_width_mm.
+  * NEVER take the building length/width from the ROOF PLAN (that is the roof SPAN, not the footprint), the SECTION, or the SUBSTRUCTURE/FOUNDATION plan. Those carry different dimensions (spans, trench widths, projections) that are NOT the building envelope. If the only dimension you can find is on one of those drawings, return null — do not substitute it.
+  * Ground and first floor should normally MATCH. A small difference usually means a bay window or projection on one floor — that is fine; note it in source_note (e.g. "first floor 300mm wider at bay"). The GROUND floor governs the masonry footprint.
+  * Read the dimension exactly as printed on the bar; do not scale or estimate. If genuinely unreadable, return null.`
     });
 
     let raw = null, lastErr;
@@ -806,6 +854,7 @@ IMPORTANT RULES:
 
 Return ONLY this JSON, no markdown:
 {
+  "overall_dimensions": { "ground_floor_length_mm": null, "ground_floor_width_mm": null, "first_floor_length_mm": null, "first_floor_width_mm": null, "source_note": null },
   "doors": [
     { "ref": "D01", "location": "Hall", "structural_w_mm": 1023, "structural_h_mm": 2100, "type": "single", "source": "schedule" }
   ],
@@ -822,6 +871,7 @@ Return ONLY this JSON, no markdown:
 }
 
 Rules:
+- OVERALL BUILDING DIMENSIONS — read the OUTERMOST dimension bar on the FLOOR PLANS only (the external building envelope). GROUND FLOOR PLAN is the governing footprint: longest outer dimension = length, shorter = width → ground_floor_length_mm / ground_floor_width_mm. Also read the FIRST FLOOR PLAN's outer dimensions → first_floor_length_mm / first_floor_width_mm as a cross-check. NEVER take these from the ROOF PLAN (that is the roof span), the SECTION, or the SUBSTRUCTURE/FOUNDATION plan. Ground and first should normally match; a small difference is usually a bay window — note it in source_note. If only a roof/section/substructure dimension is available, return null — do NOT substitute it.
 - Always read the STRUCTURAL OPENING size (width x height in mm) not the frame or leaf size
 - Include every single opening found — do not skip any
 - For bi-fold or sliding doors set type to "bifold"
