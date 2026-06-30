@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.18.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.18.1', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -948,24 +948,13 @@ IMPORTANT RULES:
 - Bi-fold and sliding doors: set type to "bifold"
 - Bay windows: set type to "bay"
 - Rooflights/Velux: set type to "rooflight"
-- METER BOXES / SERVICE BOXES: An external openings schedule (EO-numbered or similar) often
-  includes a "WALL MOUNTED ELECTRICITY METER BOX", "GAS METER BOX", "ELECTRIC METER BOX" or
-  similar service-box entry. This is NOT a door and NOT a window — it has no leaf or glazing.
-  When the DESCRIPTION text for a row contains "meter box", "meter", "electric box", "gas box"
-  or "service box": set that opening's "type" to "meter_box", read its OWN structural size from
-  its OWN row (often written oddly, e.g. "To Suit Box x 535" width and a separate height like
-  750 — read these literally; if illegible return null), and read its OWN description into the
-  "location" field (e.g. "Electricity Meter Box"). CRITICAL: never copy the dimensions, type or
-  location of an adjacent door row (such as an entrance or patio door) onto a meter-box row —
-  each row's size belongs to that row only. A meter box is small (~500-600mm), never patio-sized.
 - source field: "schedule", "plan", or "elevation"
 
 Return ONLY this JSON, no markdown:
 {
   "overall_dimensions": { "ground_floor_length_mm": null, "ground_floor_width_mm": null, "first_floor_length_mm": null, "first_floor_width_mm": null, "source_note": null },
   "doors": [
-    { "ref": "D01", "location": "Hall", "description": "Entrance door", "structural_w_mm": 1023, "structural_h_mm": 2100, "type": "single", "source": "schedule" },
-    { "ref": "EO05", "location": "Electricity Meter Box", "description": "Wall mounted electricity meter box", "structural_w_mm": 535, "structural_h_mm": 750, "type": "meter_box", "source": "schedule" }
+    { "ref": "D01", "location": "Hall", "structural_w_mm": 1023, "structural_h_mm": 2100, "type": "single", "source": "schedule" }
   ],
   "windows": [
     { "ref": "W01", "location": "Living", "structural_w_mm": 836, "structural_h_mm": 1500, "type": "standard", "source": "elevation" }
