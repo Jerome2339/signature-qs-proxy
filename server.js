@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.16.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.17.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -551,8 +551,10 @@ function mergeDocAIResults(results) {
 
   // Helper to get numeric value
   const getNum = (key) => {
-    const v = allEntities[key]?.value;
+    let v = allEntities[key]?.value;
     if (!v) return null;
+    // Strip a trailing area unit FIRST, else "94m2" -> "942" (the 2 from m2 is kept).
+    v = String(v).replace(/\s*(m²|m2|sqm|sq\.?m|m\^2)\s*$/i, '');
     const n = parseFloat(v.replace(/[^0-9.]/g, ''));
     return isNaN(n) ? null : n;
   };
