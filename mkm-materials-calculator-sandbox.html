@@ -1,0 +1,1763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MKM — Materials Take-Off Tool</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1115;--d2:#171a20;--bd:#2a2e37;--w:#f0f1f3;--mu:#8a909c;
+  --spinks:#143981;--spinks-l:#2a5cc0;--g:#FFCC00;--gn:#5a9a4c;--rd:#d4574e;--sig:#b8964e;
+}
+body{background:var(--bg);color:var(--w);font-family:'DM Sans',sans-serif;line-height:1.5;min-height:100vh}
+.wrap{max-width:880px;margin:0 auto;padding:0 1.25rem}
+
+/* Header */
+.hdr{background:var(--g);padding:1.5rem 0;border-bottom:3px solid var(--spinks)}
+.hdr-inner{max-width:880px;margin:0 auto;padding:0 1.25rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+.hdr-brand{display:flex;align-items:center;gap:1rem}
+.hdr-logo{font-family:'Archivo Black','DM Sans',sans-serif;font-size:47.5px;font-weight:400;color:var(--spinks);letter-spacing:-.03em;text-transform:uppercase;display:inline-flex;align-items:center}
+.hdr-logo .k{color:#fff}
+.hdr-tag{font-size:15px;color:rgba(20,57,129,.8);border-left:1px solid rgba(20,57,129,.3);padding-left:1rem;font-weight:500}
+.counter{background:var(--spinks);border:1px solid var(--spinks);border-radius:8px;padding:.5rem .9rem;text-align:center}
+.counter-n{font-size:20px;font-weight:600;color:#fff;line-height:1}
+.counter-l{font-size:10px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+
+/* Main */
+.main{padding:2rem 0 4rem}
+.intro{background:var(--d2);border:1px solid var(--bd);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem}
+.intro h1{font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:600;margin-bottom:.5rem}
+.intro p{font-size:13px;color:var(--mu);line-height:1.6}
+
+.card{background:var(--d2);border:1px solid var(--bd);border-radius:10px;padding:1.5rem;margin-bottom:1.25rem}
+.card-t{font-size:15px;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+
+/* Project name */
+.field{margin-bottom:1rem}
+.field label{display:block;font-size:12px;color:var(--mu);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.04em}
+.field input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--bd);border-radius:6px;padding:.7rem .9rem;color:var(--w);font-size:14px;font-family:inherit}
+.field input:focus{outline:none;border-color:var(--spinks-l)}
+.field input[readonly]{cursor:not-allowed}
+.field-hint{font-size:11px;color:var(--g);margin-top:.35rem}
+
+/* Drop zone */
+.drop{border:2px dashed var(--bd);border-radius:10px;padding:2.5rem 1.5rem;text-align:center;transition:all .2s;cursor:pointer}
+.drop.drag{border-color:var(--g);background:rgba(255,204,0,.06)}
+.drop-icon{font-size:36px;margin-bottom:.75rem;opacity:.5}
+.drop-t{font-size:15px;font-weight:500;margin-bottom:.35rem}
+.drop-s{font-size:12px;color:var(--mu)}
+.drop input{display:none}
+
+/* File list */
+.files{margin-top:1rem}
+.file-row{display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;background:rgba(255,255,255,.03);border-radius:6px;margin-bottom:.4rem;font-size:13px}
+.file-row .nm{flex:1}
+.file-row .sz{color:var(--mu);font-size:11px}
+.file-row .rm{color:var(--rd);cursor:pointer;font-size:16px;line-height:1}
+
+/* Fee confirm */
+.fee-box{background:rgba(255,204,0,.08);border:1px solid rgba(255,204,0,.35);border-radius:8px;padding:1.1rem 1.25rem;margin-top:1.25rem}
+.fee-check{display:flex;align-items:flex-start;gap:.7rem;cursor:pointer}
+.fee-check input{width:20px;height:20px;margin-top:1px;flex-shrink:0;accent-color:var(--g);cursor:pointer}
+.fee-check label{font-size:13px;color:var(--w);line-height:1.5;cursor:pointer}
+.fee-check label strong{color:var(--g)}
+
+/* Buttons */
+.btn{width:100%;border:none;border-radius:8px;padding:.9rem;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .2s;margin-top:1rem}
+.btn-primary{background:var(--spinks);color:#fff}
+.btn-primary:hover{background:var(--spinks-l)}
+.btn-primary:disabled{opacity:.35;cursor:not-allowed}
+
+/* Status */
+.status{margin-top:1.25rem;border-radius:8px;overflow:hidden;display:none}
+.status.show{display:block}
+.ai-panel{background:rgba(46,107,184,.08);border:1px solid rgba(46,107,184,.25);border-radius:8px;padding:1.1rem 1.25rem}
+.ai-title{font-size:13px;font-weight:600;color:var(--spinks-l);display:flex;align-items:center;gap:.6rem;margin-bottom:.75rem}
+.spinner{width:14px;height:14px;border:2px solid rgba(46,107,184,.3);border-top-color:var(--spinks-l);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.astep{font-size:12px;padding:.25rem 0;color:var(--mu)}
+.astep.done{color:var(--gn)}
+.astep.active{color:var(--spinks-l)}
+.astep.warn{color:var(--g)}
+
+/* Results */
+.results{display:none}
+.results.show{display:block}
+.res-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.res-m{background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:8px;padding:.9rem;text-align:center}
+.res-m-v{font-size:22px;font-weight:600;color:var(--g)}
+.res-m-l{font-size:11px;color:var(--mu);margin-top:3px}
+.sched-cat{margin-bottom:1.25rem}
+.sched-cat-t{font-size:13px;font-weight:600;color:var(--spinks-l);padding:.5rem 0;border-bottom:1px solid var(--bd);margin-bottom:.5rem}
+.sched-row{display:grid;grid-template-columns:2fr .7fr .6fr;gap:.5rem;font-size:12px;padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.sched-row .it{color:var(--w)}
+.sched-row .qt{color:var(--g);text-align:right}
+.sched-row .un{color:var(--mu);text-align:right}
+
+/* Footer */
+.ftr{background:#0a0c0f;border-top:1px solid var(--bd);padding:2rem 0;text-align:center;margin-top:2rem}
+.ftr-powered{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--sig);margin-bottom:.4rem}
+.ftr-sub{font-size:12px;color:var(--mu)}
+.ftr-link{color:var(--spinks-l);text-decoration:none}
+.sched-note{font-size:11px;color:var(--mu);padding:.75rem 0;line-height:1.5}
+.dl-row{display:flex;gap:.75rem;margin-top:1rem}
+.dl-row .btn{flex:1;margin-top:0}
+.pm-toggle{display:flex;gap:.5rem}
+.pm-btn{flex:1;padding:.7rem;border:1px solid var(--bd);border-radius:6px;background:rgba(255,255,255,.03);color:var(--mu);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.pm-btn.on{background:var(--spinks);border-color:var(--spinks);color:#fff}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem}
+.field select,.ext-wall select{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--bd);border-radius:6px;padding:.55rem .7rem;color:var(--w);font-size:13px;font-family:inherit}
+select option{background:#171a20;color:#f0f1f3}
+.wd-labour{display:inline-flex;gap:4px}
+.wd-labour .wdb{padding:5px 12px;border:1px solid var(--bd);border-radius:6px;background:rgba(255,255,255,.04);color:var(--mu);font-size:12px;cursor:pointer;font-family:inherit}
+.wd-labour .wdb.on{background:var(--g,#143981);color:#fff;border-color:var(--g,#143981);font-weight:600}
+.ext-check{display:flex;align-items:center;gap:.5rem;font-size:13px;color:var(--w);margin:1rem 0;cursor:pointer}
+.ext-check input{accent-color:var(--g);width:16px;height:16px}
+.ext-walls-t{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mu);margin:.5rem 0 .25rem}
+.ext-hint{font-size:11px;color:var(--mu);margin-bottom:.6rem;line-height:1.5}
+.ext-walls{display:grid;gap:.4rem}
+.ext-wall{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:.6rem;font-size:13px}
+</style>
+</head>
+<body>
+<div style="position:sticky;top:0;z-index:99999;background:#FFCC00;color:#143981;font:600 12px/1.45 DM Sans,Arial,sans-serif;text-align:center;padding:7px 12px;letter-spacing:.04em;border-bottom:2px solid #143981">SANDBOX — MKM evaluation environment · not connected to live data or billing · limited trial · dup-scan hardened</div>
+
+<div class="hdr">
+  <div class="hdr-inner">
+    <div class="hdr-brand">
+      <div class="hdr-logo">M<span class="k">K</span>M</div>
+      <div class="hdr-tag">Materials Take-Off + Builder Quote &middot; build 7.19 · sandbox</div>
+    </div>
+    <div class="counter">
+      <div class="counter-n" id="counter">—</div>
+      <div class="counter-l">uploads this month</div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="wrap">
+
+    <div class="intro">
+      <h1>Instant materials schedules from drawings</h1>
+      <p>Upload a house drawing set (floor plans, elevations, sections) and the system produces a complete materials take-off in under two minutes &mdash; structural shell, roof, floors, openings, second fix, sanitaryware and more. Each house drawing set analysed incurs a &pound;75 fee.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-t">1. Project details</div>
+      <div class="field">
+        <label>Project / plot name</label>
+        <input id="projName" placeholder="e.g. Plot 12, Thorne Road"/>
+      </div>
+      <div class="field">
+        <label>House type (optional)</label>
+        <input id="houseType" placeholder="e.g. Cottesbrooke"/>
+      </div>
+      <div class="field">
+        <label>MKM branch number</label>
+        <input id="branchNo" placeholder="e.g. 1042" inputmode="numeric" autocomplete="off"/>
+        <div class="field-hint" id="branchHint" style="display:none">Locked for this branch link</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-t">Project type</div>
+      <div class="pm-toggle">
+        <button type="button" class="pm-btn on" id="pmHouse" onclick="setProjectMode('house')">Whole house / new build</button>
+        <button type="button" class="pm-btn" id="pmExt" onclick="setProjectMode('extension')">Extension</button>
+      </div>
+      <div id="extSetup" style="display:none;margin-top:1rem">
+        <div class="g3">
+          <div class="field"><label>Extension length (m)</label><input id="extL" type="number" step="0.1" value="4"/></div>
+          <div class="field"><label>Extension width (m)</label><input id="extW" type="number" step="0.1" value="3"/></div>
+          <div class="field"><label>Storeys</label><select id="extStoreys"><option value="1">Single storey</option><option value="2">Two storey</option></select></div>
+        </div>
+        <label class="ext-check"><input type="checkbox" id="extStairs"/> Include a new staircase (two-storey / loft)</label>
+        <div class="ext-walls-t">Classify each wall of the extension footprint</div>
+        <div class="ext-hint">Mark any wall that joins the existing house so its brick/block, foundation and DPC are excluded. Use "Knock-through" for the wall containing the structural opening into the house.</div>
+        <div class="ext-walls">
+          <div class="ext-wall"><span>Front</span><select id="wcFront"><option value="new">New external</option><option value="party">Party / shared (exclude)</option><option value="knock">Knock-through</option></select></div>
+          <div class="ext-wall"><span>Rear</span><select id="wcRear"><option value="new">New external</option><option value="party">Party / shared (exclude)</option><option value="knock">Knock-through</option></select></div>
+          <div class="ext-wall"><span>Left</span><select id="wcLeft"><option value="new">New external</option><option value="party">Party / shared (exclude)</option><option value="knock">Knock-through</option></select></div>
+          <div class="ext-wall"><span>Right</span><select id="wcRight"><option value="new">New external</option><option value="party">Party / shared (exclude)</option><option value="knock">Knock-through</option></select></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-t">2. Upload drawings</div>
+      <label class="drop" id="dropZone">
+        <div class="drop-icon">&#128193;</div>
+        <div class="drop-t">Drop drawing PDFs here or tap to browse</div>
+        <div class="drop-s">Floor plans, elevations, sections &mdash; one house type per upload</div>
+        <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg"/>
+      </label>
+      <div class="files" id="fileList"></div>
+
+      <div class="fee-box" id="feeBox" style="display:none">
+        <div class="fee-check">
+          <input type="checkbox" id="feeCheck"/>
+          <label for="feeCheck">I understand this upload incurs a <strong>&pound;75 fee</strong> per house drawing set analysed, billed to MKM.</label>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="analyseBtn" disabled>Analyse Drawings</button>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="card results" id="results">
+      <div class="card-t">Materials schedule</div>
+      <div class="res-metrics" id="resMetrics"></div>
+      <div id="resSchedule"></div>
+      <div class="dl-row">
+        <button class="btn btn-primary" id="pdfBtn" style="background:var(--g);color:#111">Download PDF Schedule</button>
+        <button class="btn" id="csvBtn" style="background:transparent;border:1px solid var(--bd);color:var(--w)">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="card results" id="pricingCard" style="display:none">
+      <div class="card-t">MKM pricing &amp; call-off</div>
+      <p style="font-size:12px;color:var(--mu);margin:0 0 1rem;line-height:1.6">Enter a unit <strong>rate</strong> against each material and set a <strong>call-off period</strong> (weeks). Totals calculate automatically. This feeds all three documents: the priced schedule for MKM, the customer cost summary, and the builder's ordering list.</p>
+      <div style="margin-bottom:1rem">
+        <label style="font-size:12px;color:var(--mu);display:block;margin-bottom:.35rem">MKM order line (phone) &mdash; shown on the builder's list</label>
+        <input id="orderLine" placeholder="e.g. 01302 123456" style="width:100%;max-width:280px;padding:.6rem .75rem;border:1px solid var(--bd);border-radius:6px;background:rgba(255,255,255,.06);color:var(--w);font-family:'DM Sans',sans-serif;font-size:13px"/>
+      </div>
+      <div id="pricingTable"></div>
+
+      <!-- ── Windows & External Doors (supply + labour) ── -->
+      <div id="winDoorPanel" style="margin-top:1.5rem;border:1px solid var(--bd);border-radius:10px;padding:1.1rem 1.25rem;background:rgba(255,255,255,.02)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+          <div style="font-weight:700;color:var(--w);font-size:14px">Windows &amp; external doors</div>
+          <div style="font-size:11px;color:var(--mu)">Windows £425/m² &middot; doors £1,450 ea &middot; bifold £1,000/lin m</div>
+        </div>
+        <div style="margin:.9rem 0 1rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--mu)">Labour rate</span>
+          <div class="wd-labour" id="wdLabourOpts"></div>
+          <span style="font-size:12px;color:var(--mu)">per m²</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12px" id="wdTable"></table>
+        </div>
+      </div>
+
+      <!-- ── Branch-only: whole-opportunity profit lens ── -->
+      <div id="oppProfit" style="margin-top:1.5rem;border:1px solid rgba(20,57,129,.5);border-radius:10px;padding:1.1rem 1.25rem;background:rgba(20,57,129,.08)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+          <div style="font-weight:700;color:#cfe0ff;font-size:14px">Opportunity profit <span style="font-size:11px;color:var(--mu);font-weight:400">&mdash; internal, branch use only</span></div>
+          <div style="font-size:11px;color:var(--mu)">Materials 20% &middot; rooms 45%</div>
+        </div>
+        <p style="font-size:11.5px;color:var(--mu);margin:.5rem 0 1rem;line-height:1.6">The materials order is the way in &mdash; but the real prize is the fitted rooms that come with it. Adjust the room counts (read from the plans where possible) to see the full profit at stake. <strong style="color:#cfe0ff">You only win the rooms if you win the materials.</strong></p>
+
+        <div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1rem" id="roomCounts"></div>
+
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <tbody id="oppRows"></tbody>
+          <tfoot>
+            <tr><td style="padding:8px 6px;font-weight:700;border-top:2px solid rgba(255,255,255,.2)">Total opportunity profit</td>
+            <td style="padding:8px 6px;text-align:right;font-weight:700;color:var(--g);font-size:16px;border-top:2px solid rgba(255,255,255,.2)" id="oppTotal">&pound;0</td></tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- ── Builder budget — instant build cost from GIFA (rates hidden in Builder view) ── -->
+      <div id="budgetPanel" style="margin-top:1.5rem;border:1px solid var(--bd);border-radius:10px;padding:1.1rem 1.25rem;background:rgba(255,255,255,.02)"></div>
+
+      <div class="dl-row" style="margin-top:1.25rem;flex-wrap:wrap">
+        <button class="btn btn-primary" id="pdfMkmPriced" style="background:var(--g);color:#111">MKM Priced Schedule</button>
+        <button class="btn" id="pdfCustSummary" style="background:#143981;color:#fff;border:1px solid #143981">Customer Cost Summary</button>
+        <button class="btn" id="pdfBuilderList" style="background:transparent;border:1px solid var(--bd);color:var(--w)">Builder Materials List</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="ftr">
+  <div class="ftr-powered">Powered by Signature QS</div>
+  <div class="ftr-sub">Signature Construction Projects Ltd &middot; <a class="ftr-link" href="mailto:jerome@signature-construction.com">jerome@signature-construction.com</a></div>
+</div>
+
+<script>
+const PROXY = 'https://signature-qs-proxy-sandbox.onrender.com';
+const CLIENT = 'MKM';
+let files = [];
+let lastResult = null;
+let lastMats = null, lastModel = null, lastMeta = null;
+
+// Load counter on page load
+fetch(PROXY + '/usage-count?client=' + encodeURIComponent(CLIENT))
+  .then(r => r.json())
+  .then(d => { document.getElementById('counter').textContent = d.monthCount || 0; })
+  .catch(() => { document.getElementById('counter').textContent = '0'; });
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileList = document.getElementById('fileList');
+const feeBox = document.getElementById('feeBox');
+const feeCheck = document.getElementById('feeCheck');
+const analyseBtn = document.getElementById('analyseBtn');
+const branchNo = document.getElementById('branchNo');
+const branchHint = document.getElementById('branchHint');
+
+// Pre-fill & lock the branch from a per-branch link, e.g. ?branch=1042
+(function(){
+  const b = new URLSearchParams(location.search).get('branch');
+  if(b){
+    branchNo.value = b;
+    branchNo.readOnly = true;
+    branchNo.style.opacity = '.7';
+    branchHint.style.display = 'block';
+  }
+})();
+branchNo.addEventListener('input', updateBtn);
+
+fileInput.addEventListener('change', e => addFiles(e.target.files));
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag');
+  addFiles(e.dataTransfer.files);
+});
+
+function addFiles(fl){
+  for(const f of fl){ files.push(f); }
+  renderFiles();
+}
+function renderFiles(){
+  fileList.innerHTML = files.map((f,i) =>
+    '<div class="file-row"><span class="nm">'+f.name+'</span><span class="sz">'+(f.size/1024).toFixed(0)+'KB</span><span class="rm" onclick="removeFile('+i+')">&times;</span></div>'
+  ).join('');
+  feeBox.style.display = files.length ? 'block' : 'none';
+  updateBtn();
+}
+window.removeFile = function(i){ files.splice(i,1); renderFiles(); };
+
+feeCheck.addEventListener('change', updateBtn);
+function updateBtn(){
+  analyseBtn.disabled = !(files.length > 0 && feeCheck.checked && branchNo.value.trim() !== '');
+}
+
+analyseBtn.addEventListener('click', analyse);
+
+async function analyse(){
+  const status = document.getElementById('status');
+  status.className = 'status show';
+  analyseBtn.disabled = true;
+  feeCheck.disabled = true;
+
+  const steps = [];
+  function log(msg, type){
+    steps.forEach(s => { if(s.type==='active') s.type='done'; });
+    steps.push({msg, type: type||'active'});
+    render();
+  }
+  function render(){
+    status.innerHTML = '<div class="ai-panel"><div class="ai-title"><div class="spinner"></div> Analysing drawings...</div>' +
+      steps.map(s => '<div class="astep '+s.type+'">'+s.msg+'</div>').join('') + '</div>';
+  }
+
+  try {
+    log('Uploading drawings...');
+    const fd = new FormData();
+    files.forEach(f => fd.append('drawings', f));
+
+    log('AI reading title block, schedules, elevations...');
+    const resp = await fetch(PROXY + '/analyse-drawing', { method:'POST', body: fd });
+    if(!resp.ok) throw new Error('Server error ' + resp.status);
+    const resp_data = await resp.json();
+    if(!resp_data.success || !resp_data.data) throw new Error('No data returned');
+    const data = resp_data.data;
+    lastResult = data;
+
+    log('Extraction complete', 'done');
+
+    // Log the usage (fee event) to Supabase + email
+    const proj = document.getElementById('projName').value || 'Unnamed project';
+    const ht = document.getElementById('houseType').value || '';
+    const fa = (data.extra && data.extra.floor_areas && data.extra.floor_areas.total_m2) ? data.extra.floor_areas.total_m2 : (data.floor && data.floor.area_m2 ? data.floor.area_m2 : '');
+    const doors = (data.extra && data.extra.door_count != null) ? data.extra.door_count : (data.openings||[]).filter(o => /door|bifold|french/i.test(o.type||'') || /^D/i.test(o.label||'')).length;
+    const windows = (data.extra && data.extra.window_count != null) ? data.extra.window_count : (data.openings||[]).filter(o => /window/i.test(o.type||'') || /^W/i.test(o.label||'')).length;
+
+    const logResp = await fetch(PROXY + '/log-usage', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ client: CLIENT, branch: branchNo.value.trim(), project: proj, houseType: ht,
+        results: { total_m2: fa, doors, windows }, ts: new Date().toISOString() })
+    });
+    const logData = await logResp.json();
+    if(logData.monthCount != null) document.getElementById('counter').textContent = logData.monthCount;
+
+    log('Schedule generated \u2014 \u00a375 logged to MKM account', 'done');
+
+    showResults(data, fa, doors, windows);
+
+  } catch(err) {
+    log('Error: ' + err.message + ' \u2014 no fee charged. Please retry.', 'warn');
+    analyseBtn.disabled = false;
+    feeCheck.disabled = false;
+  }
+}
+
+/* ===================== MATERIALS TAKE-OFF (ported from Signature QS Housebuilder) ===================== */
+const MXW=1.10;      // global wastage: bricks, blocks, plasterboard, timber etc (10%)
+const MXW15=1.15;    // higher wastage for wall ties (15%)
+const mxFN=n=>parseFloat(n)||0;
+const mxF2=n=>Math.round(n*100)/100;
+
+function mxiFA(m){return mxFN(m.floor.L)*mxFN(m.floor.W);}
+// External brickwork areas. Returns gross (incl gables), the deducted opening
+// area, and net. Deduction rule (agreed QS basis):
+//   - external openings ONLY (internal doors never reduce the outer leaf)
+//   - only openings > 1.0 m2 are deducted for the MATERIAL order (smaller
+//     openings are absorbed by the wastage allowance; a large bi-fold/patio
+//     door is far too big to ignore).
+// Net is the bricklayer's labour measure; net x (1+waste) is the material order.
+var MX_OPENING_DEDUCT_MIN_M2 = 1.0;
+function mxiBrickAreas(m){
+  var gross=m.walls.filter(function(w){return w.ext && !(m.mode==='extension' && (w.cls==='party'||w.cls==='knock'));}).reduce(function(t,w){
+    return t+mxFN(w.L)*mxFN(w.H)+(mxFN(w.gable_area_m2)||0);
+  },0);
+  // full external opening area (every external opening) — used for the labour net
+  var openExtAll=m.openings.filter(function(o){return wdIsExternal(o);}).reduce(function(t,o){return t+mxFN(o.W)*mxFN(o.H)*mxFN(o.qty);},0);
+  // deducted area for MATERIALS — only external openings over the threshold
+  var openExtDeduct=m.openings.filter(function(o){return wdIsExternal(o) && (mxFN(o.W)*mxFN(o.H))>MX_OPENING_DEDUCT_MIN_M2;}).reduce(function(t,o){return t+mxFN(o.W)*mxFN(o.H)*mxFN(o.qty);},0);
+  return {
+    gross: gross,
+    netLabour: Math.max(0, gross-openExtAll),   // bricklayer measure: deduct ALL external openings
+    netMaterial: Math.max(0, gross-openExtDeduct), // material basis: deduct only >1m2 openings
+    openExtAll: openExtAll,
+    openExtDeduct: openExtDeduct
+  };
+}
+// Back-compat: ewn used by material quantities = net material basis.
+function mxiEWN(m){ return mxiBrickAreas(m).netMaterial; }
+function mxiAWA(m){return mxiEWN(m)+m.walls.filter(w=>!w.ext).reduce((t,w)=>t+mxFN(w.L)*mxFN(w.H),0);}
+function mxiPerim(m){ if(m.mode==='extension'){return m.walls.filter(function(w){return w.ext&&w.cls!=='party'&&w.cls!=='knock';}).reduce(function(t,w){return t+mxFN(w.L);},0);} return m.walls.reduce(function(t,w){return t+mxFN(w.L);},0);}
+function mxiOA(m){return m.openings.reduce((t,o2)=>t+mxFN(o2.W)*mxFN(o2.H)*mxFN(o2.qty),0);}
+
+// Count wet rooms (bathroom/ensuite/cloakroom) from the extracted room schedule.
+// Returns null when no room data is present, so callers can fall back to a heuristic.
+function mxiWetRoomCount(m){
+  var rooms=(m&&m.extractedSpec&&m.extractedSpec.rooms)||[];
+  if(!rooms.length) return null;
+  var n=0;
+  rooms.forEach(function(r){
+    var name=((typeof r==='string')?r:(r.type||r.name||r.label||'')).toLowerCase();
+    var qty=(r&&r.count)?(parseInt(r.count)||1):1;
+    if(/cloak|\bw[\.\/]?c\b|powder|toilet|en[-\s]?suite|ensuite|bath|shower\s?room/.test(name)) n+=qty;
+  });
+  return n;
+}
+function mxiRA(m){
+  const sp=mxFN(m.roof.span),ln=mxFN(m.roof.length),pt=mxFN(m.roof.pitch),ov=mxFN(m.roof.overhang);
+  if(m.roofType==='flat')return(sp+ov*2)*(ln+ov*2);
+  const pr=pt*(Math.PI/180);return((sp/2)/Math.cos(pr))*2*(ln+ov*2);
+}
+function mxiRL(m){const sp=mxFN(m.roof.span),pt=mxFN(m.roof.pitch),ov=mxFN(m.roof.overhang);return(sp/2)/Math.cos(pt*(Math.PI/180))+ov;}
+
+function mxiCalc(m){
+  const fa=mxiFA(m),ewn=mxiEWN(m),awa=mxiAWA(m),perim=mxiPerim(m),ra=mxiRA(m),cH=mxFN(m.ceilingH);
+  const brickAreas=mxiBrickAreas(m); // {gross, netLabour, netMaterial, openExtAll, openExtDeduct}
+  // expose for the Housebuilder labour tool (labour priced on netLabour)
+  m._brickAreas=brickAreas;
+  const ss=mxFN(m.studSpacing)/1000,js=mxFN(m.joistSpacing)/1000,rs=mxFN(m.rafterSpacing)/1000;
+  const sp=mxFN(m.roof.span),rln=mxFN(m.roof.length),ov=mxFN(m.roof.overhang);
+
+  // Use extracted spec data if available
+  const extSpec=m.extractedSpec||{};
+  const studMm=extSpec.internal_stud_mm||63;
+  const boardMm=extSpec.internal_board_mm||12.5;
+  const boardLayers=extSpec.internal_board_layers||1;
+  const isSoundbloc=boardMm>=15||(extSpec.internal_board_type||'').toLowerCase().includes('sound');
+  const boardItem=isSoundbloc?'Gyproc Soundbloc '+boardMm+'mm':'Plasterboard '+boardMm+'mm TE';
+  const boardArea=1.2*2.4; // standard board 2.88m2
+
+  const mats=[];
+
+  // \u2500\u2500 EXTERNAL WALLS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  if(m.wallType==='cavity'){
+    // Outer leaf: facing brick OR render-on-block, decided by the parsed wall spec.
+    var wsType=((m.extractedSpec&&m.extractedSpec.wallSpec&&m.extractedSpec.wallSpec.type)||'').toUpperCase();
+    var wsLeaf=((m.extractedSpec&&m.extractedSpec.wallSpec&&m.extractedSpec.wallSpec.outer_leaf)||'').toUpperCase();
+    var isRenderLeaf=/RENDER/.test(wsType)||/STONE/.test(wsType)||/BLOCK/.test(wsLeaf)||/RENDER|STONE/.test(wsLeaf);
+    if(isRenderLeaf){
+      // RENDER (or reconstituted stone) ON BLOCKWORK outer leaf — NOT facing brick.
+      mats.push({cat:'Masonry',item:'Concrete blocks 100mm (outer leaf)',qty:Math.ceil(ewn*10*MXW),unit:'nr',note:'Render/stone outer leaf on 100mm block, 10 blocks/m2 + 10% waste',basis:'net '+brickAreas.netMaterial.toFixed(1)+'m2 (gross '+brickAreas.gross.toFixed(1)+' less openings >1m2)'});
+      mats.push({cat:'Masonry',item:'Mortar blockwork outer leaf (25kg bags)',qty:Math.ceil(ewn*0.35*MXW),unit:'bags',note:'0.35 bags/m2',basis:ewn.toFixed(1)+'m2'});
+      mats.push({cat:'Masonry',item:'Through-coloured render system (rough cast)',qty:mxF2(ewn*MXW),unit:'m2',note:'Render to outer blockwork face (e.g. Wetherby/S.A.) — incl. basecoat, mesh & topcoat to spec',basis:ewn.toFixed(1)+'m2'});
+      mats.push({cat:'Masonry',item:'Render stop & corner beads',qty:Math.ceil((perim+ (m.openings.filter(wdIsExternal).length*3))*MXW),unit:'lin m',note:'Perimeter + reveals to openings',basis:'Perimeter + reveals'});
+      mats.push({cat:'Masonry',item:'Engineering bricks below DPC',qty:Math.ceil(perim*0.150*60*MXW),unit:'nr',note:'~2 courses (150mm) below DPC to perimeter, 60/m2 + waste',basis:perim.toFixed(1)+'m x 0.15m'});
+      mats.push({cat:'Masonry',item:'Mortar engineering brick (25kg bags)',qty:Math.ceil(perim*0.150*0.6*MXW),unit:'bags',note:'0.6 bags/m2 below-DPC brickwork',basis:perim.toFixed(1)+'m x 0.15m'});
+    }else{
+      mats.push({cat:'Masonry',item:'Facing bricks (outer leaf)',qty:Math.ceil(ewn*60*MXW),unit:'nr',note:'60/m2 stretcher bond + 10% waste',basis:'net '+brickAreas.netMaterial.toFixed(1)+'m2 (gross '+brickAreas.gross.toFixed(1)+' less openings >1m2)'});
+      mats.push({cat:'Masonry',item:'Mortar brickwork (25kg bags)',qty:Math.ceil(ewn*0.6*MXW),unit:'bags',note:'0.6 bags/m2 facing bricks',basis:ewn.toFixed(1)+'m2'});
+    }
+    mats.push({cat:'Masonry',item:'Concrete blocks 100mm dense (inner leaf)',qty:Math.ceil(awa*10*MXW),unit:'nr',note:'10 blocks/m2 + 10% waste',basis:awa.toFixed(1)+'m2'});
+    mats.push({cat:'Masonry',item:'Mortar blockwork (25kg bags)',qty:Math.ceil(awa*0.35*MXW),unit:'bags',note:'0.35 bags/m2',basis:awa.toFixed(1)+'m2'});
+    mats.push({cat:'Masonry',item:'Stainless steel wall ties',qty:Math.ceil(ewn*3*MXW15),unit:'nr',note:'3/m2 + 15% waste (incl. allowance for reveal ties)',basis:ewn.toFixed(1)+'m2'});
+    mats.push({cat:'Masonry',item:'Partial-fill cavity insulation board (PIR/phenolic)',qty:mxF2(ewn*MXW),unit:'m2',note:'MKM-supplied rigid board (e.g. Celotex CG5000/Kingspan TW55). NOTE: if spec is BLOWN full-fill mineral fibre, that is specialist subcontractor-supplied — remove this line.',basis:ewn.toFixed(1)+'m2'});
+    mats.push({cat:'Masonry',item:'DPC 150mm',qty:mxF2(perim*MXW),unit:'m',note:'Base ext walls',basis:perim.toFixed(1)+'m'});
+  }else if(m.wallType==='solid'){
+    mats.push({cat:'Masonry',item:'Concrete blocks 100mm dense',qty:Math.ceil(awa*7.26*2*MXW),unit:'nr',note:'Two leaves',basis:awa.toFixed(1)+'m2'});
+    mats.push({cat:'Masonry',item:'Mortar (25kg bags)',qty:Math.ceil(awa*0.7*MXW),unit:'bags',note:'Both leaves',basis:awa.toFixed(1)+'m2'});
+    mats.push({cat:'Masonry',item:'DPC 150mm',qty:mxF2(perim*MXW),unit:'m',note:'Base ext walls',basis:perim.toFixed(1)+'m'});
+    mats.push({cat:'Masonry',item:'Wall insulation 100mm PIR',qty:mxF2(ewn*MXW),unit:'m2',note:'Internal face',basis:ewn.toFixed(1)+'m2'});
+  }else{
+    const sLin=awa*((1/ss)*cH+2+(1/0.6));
+    mats.push({cat:'Timber Frame',item:'CLS '+studMm+'mm studs/plates/noggings',qty:Math.ceil(sLin*MXW),unit:'lin m',note:'At '+m.studSpacing+'mm c/c incl plates & noggings',basis:awa.toFixed(1)+'m2'});
+    mats.push({cat:'Timber Frame',item:'OSB3 11mm sheathing',qty:mxF2(ewn*MXW),unit:'m2',note:'Ext face',basis:ewn.toFixed(1)+'m2'});
+    mats.push({cat:'Timber Frame',item:'Breather membrane',qty:mxF2(ewn*MXW),unit:'m2',note:'Over sheathing',basis:ewn.toFixed(1)+'m2'});
+    mats.push({cat:'Timber Frame',item:'Vapour control layer',qty:mxF2(awa*MXW),unit:'m2',note:'Internal face',basis:awa.toFixed(1)+'m2'});
+    mats.push({cat:'Timber Frame',item:'Wall insulation 100mm PIR',qty:mxF2(ewn*MXW),unit:'m2',note:'Between studs',basis:ewn.toFixed(1)+'m2'});
+  }
+
+  // Floor areas — hierarchy:
+  //  1) explicit per-floor ground_m2 / first_m2 if read;
+  //  2) else the GIFA total (now parses correctly) — this is the TRUE floor area
+  //     including any L-shape / garage-over notch, so it's preferred for non-rectangular plans;
+  //  3) else fall back to the internal bounding RECTANGLE (L x W less wall build-up) —
+  //     correct only for rectangular footprints, so flagged as approximate.
+  // Self-build plans are rarely standard boxes (garage-with-room-over forms an L), so GIFA
+  // is the right primary source whenever it's available.
+  var faObj=(m.extractedSpec&&m.extractedSpec.floorAreas)||{};
+  var ws=(m.extractedSpec&&m.extractedSpec.wallSpec)||{};
+  var buildupM=((mxFN(ws.outer_leaf_mm)||102)+(mxFN(ws.cavity_mm)||100)+(mxFN(ws.inner_leaf_mm)||100))/1000; // ~0.30m
+  var extL=mxFN(m.floor.L), extW=mxFN(m.floor.W);
+  var rectFloor=(extL>0&&extW>0)?Math.max(0,(extL-2*buildupM)*(extW-2*buildupM)):mxiFA(m); // internal bounding rectangle
+  var footprint=mxiFA(m);
+  // 2-storey? explicit storeys, else inferred from external wall height (>4m ≈ two storeys)
+  var upperFloors=(mxFN(m.storeys)>=2)?(mxFN(m.storeys)-1):((m.walls&&m.walls[0]&&mxFN(m.walls[0].H)>4.0)?1:0);
+  var totalFA=mxFN(faObj.total_m2)||0;
+  // sanity-bound the GIFA total: plausible for this footprint is ~0.6x (single storey, L-shape)
+  // up to ~2.4x (full 2-storey). Outside that it's a bad read — ignore it.
+  var gifaUsable=(footprint>0 && totalFA>footprint*0.6 && totalFA<footprint*2.4);
+
+  var faGround=mxFN(faObj.ground_m2);
+  var faFirst=mxFN(faObj.first_m2);
+  // SANITY: a real floor area can't be much smaller than the internal bounding rectangle.
+  // The parser sometimes returns a single ROOM area (e.g. 12.8m² living room) in these
+  // fields — reject anything implausibly small (< 60% of the internal rectangle) so it
+  // falls through to the GIFA / dimension logic instead of being trusted directly.
+  var floorMin=(rectFloor>0?rectFloor*0.6:0);
+  if(faGround>0 && faGround<floorMin) faGround=null;
+  if(faFirst>0 && faFirst<floorMin) faFirst=null;
+  m._floorAreaNote='';
+  if(faGround>0 && faFirst>0){
+    // best case — explicit split, both plausible, nothing to infer
+  } else if(gifaUsable){
+    // GIFA-first: true area incl. L-shape notch. Split across storeys if not given.
+    if(!(faGround>0) && !(faFirst>0)){
+      if(upperFloors>0){ faGround=totalFA/(1+upperFloors); faFirst=faGround*upperFloors; }
+      else { faGround=totalFA; faFirst=0; }
+    } else if(!(faFirst>0)){ faFirst=upperFloors>0?Math.max(0,totalFA-faGround):0; }
+    else if(!(faGround>0)){ faGround=Math.max(0,totalFA-faFirst); }
+    var perFloorGifa=totalFA/(1+upperFloors);
+    if(rectFloor>0 && perFloorGifa < rectFloor*0.9) m._floorAreaNote='Non-rectangular footprint detected (floor area from GIFA, below bounding rectangle — e.g. L-shape / garage-over).';
+  } else {
+    // fallback — no usable GIFA: internal bounding rectangle (rectangular assumption)
+    if(!(faGround>0)) faGround=rectFloor;
+    if(!(faFirst>0)) faFirst=upperFloors>0?rectFloor*upperFloors:0;
+    m._floorAreaNote='Floor area estimated from overall dimensions (assumes rectangular footprint). If this is an L-shape / garage-over, confirm GIFA.';
+  }
+  var jSpacing=mxFN(m.joistSpacing)/1000||0.4;
+  if(m.mode==='extension'){ faGround=fa; faFirst=(mxFN(m.storeys)>=2?fa:0); }
+
+  // ── INTERNAL PARTITION WALLS ──────────────────────────────────────────────
+  // Area basis:
+  //   - if measured internal walls were extracted, use them;
+  //   - else estimate area from the FLOOR AREA x a multiplier derived from how
+  //     partitioned the house is (room + internal-door count) — a chopped-up house
+  //     (many rooms/doors) has more internal wall than an open-plan one. Far better
+  //     than a fixed 1.8. The estimated area is also user-editable in the panel.
+  // Construction: block-down / stud-up RULE, with a per-floor mix slider (the block/
+  // stud split is shown by hatching on the plan, which isn't read automatically).
+  var intMeasured=m.walls.filter(function(w){return !w.ext;});
+  var rooms2=(m.extractedSpec&&m.extractedSpec.rooms)||[];
+  var nRooms=rooms2.length||0;
+  var nIntDoors=(typeof internalDoorCount==='function')?internalDoorCount():0;
+  // partition multiplier: base 1.3 (open plan) → up to ~1.9 (heavily divided).
+  // Each room and internal door nudges it up. Tuned so a chopped-up 3-bed
+  // (Middleham: 14 rooms, 12 io doors) lands ~1.8, an open-plan house ~1.4.
+  var partMult;
+  if(nRooms||nIntDoors){ partMult=1.3 + Math.min(0.6, (nRooms*0.022)+(nIntDoors*0.014)); }
+  else { partMult=1.7; } // fallback when neither read
+  var totalFloor=(faGround||0)+(faFirst||0); if(!(totalFloor>0)) totalFloor=fa;
+  // allow a user override of the estimated internal wall AREA (whole-house m2)
+  var intWallAreaTotal=(m._intWallAreaOverride>0)?m._intWallAreaOverride
+      : (intMeasured.length>0 ? intMeasured.reduce(function(t,w){return t+mxFN(w.L)*mxFN(w.H);},0)
+                              : totalFloor*partMult);
+  // split internal wall area across floors in proportion to floor area
+  var gShare=(totalFloor>0)?(faGround/totalFloor):1, fShare=1-gShare;
+  var intAreaGround=intWallAreaTotal*gShare, intAreaFirst=intWallAreaTotal*fShare;
+  // block/stud MIX per floor — fraction that is STUD. Rule default: ground 0% stud
+  // (all block), first 100% stud. User overrides via slider (m._intStudMixGround/First).
+  var studMixG=(m._intStudMixGround!=null)?m._intStudMixGround:0.0;
+  var studMixF=(m._intStudMixFirst!=null)?m._intStudMixFirst:1.0;
+  var studAreaG=intAreaGround*studMixG, blockAreaG=intAreaGround*(1-studMixG);
+  var studAreaF=intAreaFirst*studMixF, blockAreaF=intAreaFirst*(1-studMixF);
+  var studAreaTot=studAreaG+studAreaF, blockAreaTot=blockAreaG+blockAreaF;
+  m._intWallAreas={total:intWallAreaTotal,ground:intAreaGround,first:intAreaFirst,studMixG:studMixG,studMixF:studMixF,measured:intMeasured.length>0,multiplier:partMult};
+  var estTag=intMeasured.length>0?'':' (est.)';
+
+  // STUDWORK portion
+  if(studAreaTot>0.5){
+    var studH=cH, studsPerMetre=1/ss, noggingsPerMetre=Math.ceil(studH/0.6)-1;
+    var linearPerM2=studsPerMetre*studH + 2 + noggingsPerMetre;
+    mats.push({cat:'Internal Walls',item:'CLS '+studMm+'x89mm studs/plates/noggings'+estTag,qty:Math.ceil(studAreaTot*linearPerM2*MXW),unit:'lin m',note:studMm+'mm studs at '+m.studSpacing+'mm c/c + plates + noggings',basis:studAreaTot.toFixed(1)+'m2 stud walls'});
+    mats.push({cat:'Internal Walls',item:boardItem+' (both faces)'+estTag,qty:Math.ceil(studAreaTot*2*boardLayers*MXW/boardArea),unit:'nr',note:boardMm+'mm '+boardLayers+' layer(s) both faces',basis:studAreaTot.toFixed(1)+'m2 x2 faces'});
+    mats.push({cat:'Internal Walls',item:'Acoustic mineral wool insulation (stud)'+estTag,qty:mxF2(studAreaTot*MXW),unit:'m2',note:'Between studs (bathroom/separating walls Part E)',basis:studAreaTot.toFixed(1)+'m2'});
+  }
+  // BLOCKWORK portion — 100mm block, dot-and-dab plasterboard + skim both faces
+  if(blockAreaTot>0.5){
+    mats.push({cat:'Internal Walls',item:'Concrete blocks 100mm (internal partitions)'+estTag,qty:Math.ceil(blockAreaTot*10*MXW),unit:'nr',note:'10 blocks/m2 + 10% waste',basis:blockAreaTot.toFixed(1)+'m2 block walls'});
+    mats.push({cat:'Internal Walls',item:'Mortar internal blockwork (25kg bags)'+estTag,qty:Math.ceil(blockAreaTot*0.35*MXW),unit:'bags',note:'0.35 bags/m2',basis:blockAreaTot.toFixed(1)+'m2'});
+    mats.push({cat:'Internal Walls',item:boardItem+' on dabs (both faces)'+estTag,qty:Math.ceil(blockAreaTot*2*MXW/boardArea),unit:'nr',note:'Dot-and-dab to both faces',basis:blockAreaTot.toFixed(1)+'m2 x2 faces'});
+    mats.push({cat:'Internal Walls',item:'Plasterboard adhesive / dab (25kg)'+estTag,qty:Math.ceil(blockAreaTot*2*5/25*MXW),unit:'bags',note:'~5kg/m2 dot-and-dab',basis:blockAreaTot.toFixed(1)+'m2 x2 faces'});
+    mats.push({cat:'Internal Walls',item:'Finishing plaster skim — block walls (25kg)'+estTag,qty:Math.ceil(blockAreaTot*2/10*MXW),unit:'bags',note:'Skim both faces ~10m2/bag',basis:blockAreaTot.toFixed(1)+'m2 x2 faces'});
+  }
+  // honest flag — the split is a rule, confirmable against the hatched plan
+  if(!m._floorAreaNote2){ m._floorAreaNote2='Internal walls: ground assumed blockwork, first assumed stud'+(intMeasured.length>0?'':'; area estimated from room/door count')+' — block/stud split is shown by hatching on the plan (not read automatically). Adjust the Internal Walls mix sliders against the drawing before ordering.'; }
+
+  // \u2500\u2500 FLOOR \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── GROUND FLOOR CONSTRUCTION ───────────────────────────────────────────
+  // Use extracted ground floor area if available, otherwise use fa
+
+  if(m.floorType==='concrete'){
+    mats.push({cat:'Ground Floor (Concrete Slab)',item:'Sharp sand blinding 50mm',qty:mxF2(faGround*0.05*MXW),unit:'m3',note:'Below DPM',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Concrete Slab)',item:'DPM 300mu polythene',qty:mxF2(faGround*MXW),unit:'m2',note:'Lapped and taped',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Concrete Slab)',item:'Floor insulation 100mm PIR',qty:mxF2(faGround*MXW),unit:'m2',note:'Meets Part L U-value 0.13',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Concrete Slab)',item:'Ready-mix concrete C25 100mm slab',qty:mxF2(faGround*0.1*MXW),unit:'m3',note:'Ground bearing, pump rate if needed',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Concrete Slab)',item:'A142 welded steel mesh',qty:mxF2(faGround*MXW),unit:'m2',note:'200x200mm 3.55kg/m2',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Concrete Slab)',item:'Edge insulation 100mm EPS',qty:mxF2(perim*0.25*MXW),unit:'lin m',note:'Perimeter edge insulation',basis:perim.toFixed(1)+'m perimeter'});
+  } else {
+    // Beam & block ground floor
+    var nBeams=Math.ceil(mxFN(m.floor.W)/0.6)+1;
+    mats.push({cat:'Ground Floor (Beam & Block)',item:'Precast concrete beams',qty:Math.ceil(nBeams*mxFN(m.floor.L)),unit:'lin m',note:'At 600mm c/c',basis:nBeams+' beams'});
+    mats.push({cat:'Ground Floor (Beam & Block)',item:'Concrete infill blocks 100mm',qty:Math.ceil(faGround*10*MXW),unit:'nr',note:'10 blocks/m2 + 10% waste',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Beam & Block)',item:'Sand/cement grout',qty:mxF2(faGround*0.02*MXW),unit:'m3',note:'Joints between blocks',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Beam & Block)',item:'Floor insulation 100mm PIR',qty:mxF2(faGround*MXW),unit:'m2',note:'Over beam & block, under screed',basis:faGround.toFixed(1)+'m2'});
+    mats.push({cat:'Ground Floor (Beam & Block)',item:'Sand/cement screed 65mm',qty:mxF2(faGround*0.065*MXW),unit:'m3',note:'Over insulation, power floated',basis:faGround.toFixed(1)+'m2'});
+  }
+
+  // ── FIRST FLOOR CONSTRUCTION (Timber) ────────────────────────────────────
+  if(faFirst>0){
+    var floorW=mxFN(m.floor.W)||Math.sqrt(faFirst);
+    var floorL=faFirst/floorW;
+    var nJ=Math.ceil(floorW/jSpacing)+1;
+    // Joist size based on span (standard: 47x195 up to 4.5m, 47x220 up to 5.5m, 47x245 up to 6m)
+    var joistSize=floorW<=4.5?'47x195mm':floorW<=5.5?'47x220mm':'47x245mm';
+    mats.push({cat:'First Floor (Timber)',item:'Floor joists '+joistSize+' C24',qty:Math.ceil(nJ*floorL*MXW),unit:'lin m',note:'At '+m.joistSpacing+'mm c/c — span '+floorW.toFixed(1)+'m',basis:nJ+' joists'});
+    mats.push({cat:'First Floor (Timber)',item:'Joist hangers galv steel (BAT or similar)',qty:Math.ceil(nJ*2),unit:'nr',note:'Both ends of each joist',basis:nJ+' joists x2'});
+    mats.push({cat:'First Floor (Timber)',item:'Solid noggins 47x'+joistSize.split('x')[1],qty:Math.ceil(floorL/1.8*nJ*0.47*MXW),unit:'lin m',note:'At 1800mm c/c between joists',basis:'1 row per 1.8m span'});
+    mats.push({cat:'First Floor (Timber)',item:'Herringbone strutting (galv steel)',qty:Math.ceil(floorL/1.8*(nJ-1)*MXW),unit:'nr',note:'Lateral restraint at mid-span',basis:'1 per joist bay per row'});
+    mats.push({cat:'First Floor (Timber)',item:'T&G chipboard 22mm P5 moisture resistant',qty:mxF2(faFirst*MXW),unit:'m2',note:'Glued and screwed to joists',basis:faFirst.toFixed(1)+'m2'});
+    mats.push({cat:'First Floor (Timber)',item:'Acoustic mineral wool quilt 100mm',qty:mxF2(faFirst*MXW),unit:'m2',note:'Between joists for sound insulation Part E',basis:faFirst.toFixed(1)+'m2'});
+    mats.push({cat:'First Floor (Timber)',item:'Resilient bars (acoustic)',qty:mxF2(faFirst/0.6*MXW),unit:'nr',note:'Ceiling side — 600mm c/c for sound',basis:faFirst.toFixed(1)+'m2'});
+    mats.push({cat:'First Floor (Timber)',item:'Plasterboard 15mm Soundbloc ceiling',qty:Math.ceil(faFirst*MXW/2.88),unit:'nr',note:'Below joists on resilient bars',basis:faFirst.toFixed(1)+'m2'});
+  }
+
+  // \u2500\u2500 ROOF \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  if(m.roofType==='flat'){
+    const nRJ=Math.ceil(rln/js)+1;
+    mats.push({cat:'Roof (Flat)',item:'Flat roof joists 47x175mm C24',qty:Math.ceil(nRJ*(sp+ov*2)*MXW),unit:'lin m',note:'At '+m.rafterSpacing+'mm c/c',basis:rln.toFixed(1)+'m run'});
+    mats.push({cat:'Roof (Flat)',item:'Firring pieces tapered 1:60',qty:Math.ceil(nRJ*(sp+ov*2)*MXW),unit:'lin m',note:'Drainage fall',basis:rln.toFixed(1)+'m run'});
+    mats.push({cat:'Roof (Flat)',item:'OSB3 18mm roof deck',qty:mxF2(ra*MXW),unit:'m2',note:'Structural deck',basis:ra.toFixed(1)+'m2'});
+    mats.push({cat:'Roof (Flat)',item:'VCL',qty:mxF2(ra*MXW),unit:'m2',note:'Below insulation',basis:ra.toFixed(1)+'m2'});
+    mats.push({cat:'Roof (Flat)',item:'PIR insulation 150mm warm roof',qty:mxF2(ra*MXW),unit:'m2',note:'100+50mm staggered',basis:ra.toFixed(1)+'m2'});
+    mats.push({cat:'Roof (Flat)',item:'EPDM membrane 1.2mm',qty:mxF2(ra*MXW),unit:'m2',note:'Fully bonded',basis:ra.toFixed(1)+'m2'});
+    mats.push({cat:'Roof (Flat)',item:'Aluminium drip edge trim',qty:mxF2((2*(sp+ov*2)+2*(rln+ov*2))*MXW),unit:'lin m',note:'Perimeter',basis:'Perimeter'});
+  }else{
+    const rl=mxiRL(m);
+    // Trussed rafters at 600mm centres (standard for prefabricated roof trusses)
+    var trussSpacing=0.6;
+    var nTruss=Math.ceil((rln+ov*2)/trussSpacing)+1;
+    mats.push({cat:'Roof (Pitched)',item:'Trussed rafters (Fink) to span '+sp.toFixed(1)+'m',qty:Math.ceil(nTruss),unit:'nr',note:'At 600mm c/c, prefabricated to engineer design, '+m.roof.pitch+'\u00b0 pitch',basis:(rln+ov*2).toFixed(1)+'m roof length'});
+    mats.push({cat:'Roof (Pitched)',item:'Truss clips / framing anchors',qty:Math.ceil(nTruss*2),unit:'nr',note:'2 per truss to wall plate',basis:nTruss+' trusses x2'});
+    mats.push({cat:'Roof (Pitched)',item:'Galv truss bracing 22x97mm',qty:Math.ceil((rln+ov*2)*3*MXW),unit:'lin m',note:'Longitudinal + diagonal + chevron bracing',basis:'BS 5268 bracing'});
+    mats.push({cat:'Roof (Pitched)',item:'Lateral restraint straps 30x5mm',qty:Math.ceil((rln+ov*2)/2),unit:'nr',note:'Gable & wall plate restraint at 2m c/c',basis:(rln+ov*2).toFixed(1)+'m'});
+    mats.push({cat:'Roof (Pitched)',item:'Roofing underlay',qty:mxF2(ra*MXW),unit:'m2',note:'Over rafters',basis:ra.toFixed(1)+'m2'});
+    const bL=Math.ceil(rl/0.345)*(rln+ov*2)*2;
+    mats.push({cat:'Roof (Pitched)',item:'Tiling battens 25x50mm',qty:Math.ceil(bL*MXW),unit:'lin m',note:'345mm gauge',basis:ra.toFixed(1)+'m2'});
+    mats.push({cat:'Roof (Pitched)',item:'Roof tiles concrete interlocking',qty:Math.ceil(ra*10*MXW),unit:'nr',note:'~10/m2',basis:ra.toFixed(1)+'m2'});
+    mats.push({cat:'Roof (Pitched)',item:'Ridge tiles half-round',qty:Math.ceil((rln+ov*2)/0.3*MXW),unit:'nr',note:'~3.3/lin m',basis:(rln+ov*2).toFixed(1)+'m'});
+    // ── Mechanical fixing (mandatory) — dry ridge & dry verge ──
+    mats.push({cat:'Roof (Pitched)',item:'Dry ridge fixing kit',qty:mxF2((rln+ov*2)*MXW),unit:'lin m',note:'Mechanically fixed ridge — mandatory (BS 5534), incl unions & ridge roll',basis:(rln+ov*2).toFixed(1)+'m ridge'});
+    var vergeRun=rl*2*2; // 2 gable rakes x 2 slopes, rl = rafter (slope) length
+    mats.push({cat:'Roof (Pitched)',item:'Dry verge units (gable rake)',qty:Math.ceil(vergeRun/0.3),unit:'nr',note:'Mechanically fixed verge — mandatory (BS 5534), ~3.3/m + end caps',basis:vergeRun.toFixed(1)+'m verge'});
+    mats.push({cat:'Roof (Pitched)',item:'PIR insulation 150mm between rafters',qty:mxF2(ra*MXW),unit:'m2',note:'Cut between + 50mm over',basis:ra.toFixed(1)+'m2'});
+    // ── Warm-side vapour control to roof PIR (Part L / condensation control) ──
+    mats.push({cat:'Roof (Pitched)',item:'Vapour control layer (VCL) to roof',qty:mxF2(ra*MXW),unit:'m2',note:'Warm side of rafter insulation, before ceiling board',basis:ra.toFixed(1)+'m2'});
+    mats.push({cat:'Roof (Pitched)',item:'VCL sealing tape',qty:Math.ceil(ra/15*MXW),unit:'rolls',note:'Sealing laps & penetrations of VCL',basis:ra.toFixed(1)+'m2'});
+  }
+
+  // \u2500\u2500 BOARDS & LININGS (external walls) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  if(m.plaster){
+    const pbW=m.wallType==='timber'?awa*2:awa;
+    const ceilBoards=Math.ceil(fa*MXW/boardArea);
+    const wallBoards=Math.ceil(pbW*MXW/boardArea);
+    mats.push({cat:'Boards & Linings',item:boardItem+' ceiling',qty:ceilBoards,unit:'nr',note:boardMm+'mm \u2014 '+boardArea+'m2 per board',basis:fa.toFixed(1)+'m2'});
+    mats.push({cat:'Boards & Linings',item:boardItem+' walls (ext leaf lining)',qty:wallBoards,unit:'nr',note:boardMm+'mm '+boardLayers+' layer(s)',basis:pbW.toFixed(1)+'m2'});
+    mats.push({cat:'Boards & Linings',item:'Plasterboard dab adhesive (25kg)',qty:Math.ceil(awa/2*MXW),unit:'bags',note:'1 bag per 2m2',basis:awa.toFixed(1)+'m2'});
+    mats.push({cat:'Boards & Linings',item:'Jointing tape and filler',qty:Math.ceil((pbW+fa)*MXW/20),unit:'rolls/bags',note:'1 per 20m2',basis:(pbW+fa).toFixed(1)+'m2'});
+    mats.push({cat:'Boards & Linings',item:'Finishing plaster skim (25kg)',qty:Math.ceil((awa+fa)*1.5/25*MXW),unit:'bags',note:'1.5kg/m2',basis:(awa+fa).toFixed(1)+'m2'});
+    // ── Plastering prep sundries ──
+    mats.push({cat:'Boards & Linings',item:'Fibreglass mesh scrim tape (90m roll)',qty:Math.ceil((awa+fa)/45*MXW),unit:'rolls',note:'Scrim to board joints before skim — prevents cracking',basis:(awa+fa).toFixed(1)+'m2'});
+    mats.push({cat:'Boards & Linings',item:'PVA bonding agent (5L)',qty:Math.ceil((awa+fa)/40*MXW),unit:'tubs',note:'Seal/prime boards & blockwork before skim',basis:(awa+fa).toFixed(1)+'m2'});
+  }
+
+  // \u2500\u2500 STRUCTURAL \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  if(m.openings.length>0){
+    var doors=m.openings.filter(function(o){return /door|bifold|french/i.test(o.type||'')||/^D\d/i.test(o.label)||(!/window/i.test(o.type||'')&&mxFN(o.H)>=2.0);});
+    var wins=m.openings.filter(function(o){return /window/i.test(o.type||'')||/^W\d/i.test(o.label)||(!/door|bifold|french/i.test(o.type||'')&&mxFN(o.H)>0.3&&mxFN(o.H)<2.0);});
+    if(!wins.length&&!doors.length){wins=m.openings;}
+
+    // Lintel schedule — steel cavity lintels over EXTERNAL openings only (windows +
+    // external doors). Internal doors sit in stud/blockwork partitions, not the cavity
+    // wall, so they don't take a steel cavity lintel. Width + 300mm bearing.
+    var lintelGroups={};
+    m.openings.forEach(function(o){
+      var w=mxFN(o.W);if(!w)return;
+      var isWin=/window/i.test(o.type||'')||/^W\d/i.test(o.label)||(!/door|bifold|french/i.test(o.type||'')&&mxFN(o.H)>0.3&&mxFN(o.H)<2.0);
+      var isExtDoor=(/door|bifold|french/i.test(o.type||'')||/^D\d/i.test(o.label)||mxFN(o.H)>=2.0) && wdIsExternal(o);
+      if(!(isWin||isExtDoor))return;
+      var len=Math.ceil((w+0.3)*1000/50)*50;
+      lintelGroups[len]=(lintelGroups[len]||0)+(o.qty||1);
+    });
+    Object.keys(lintelGroups).sort(function(a,b){return a-b;}).forEach(function(len){
+      var qty=lintelGroups[len];
+      mats.push({cat:'Structural',item:'Steel lintel '+len+'mm SB+ type',qty:Math.ceil(qty),unit:'nr',note:'External openings only, width + 300mm bearing (150mm each side)',basis:qty+' opening(s)'});
+    });
+
+    // Window cill schedule — cast stone, width + 300mm
+    if(wins.length>0){
+      var cillGroups={};
+      wins.forEach(function(o){
+        var w=mxFN(o.W);if(!w)return;
+        var len=Math.ceil((w+0.3)*1000/50)*50;
+        cillGroups[len]=(cillGroups[len]||0)+(o.qty||1);
+      });
+      Object.keys(cillGroups).sort(function(a,b){return a-b;}).forEach(function(len){
+        var qty=cillGroups[len];
+        mats.push({cat:'Structural',item:'Cast stone cill '+len+'mm',qty:Math.ceil(qty),unit:'nr',note:'Window width + 300mm bearing (150mm each side)',basis:qty+' window(s)'});
+      });
+      var totalCillRun=wins.reduce(function(t,o){return t+mxFN(o.W)+0.3;},0);
+      mats.push({cat:'Structural',item:'Cill DPC / cavity tray 150mm',qty:mxF2(totalCillRun*MXW),unit:'lin m',note:'Under all window cills',basis:wins.length+' windows'});
+      // Stone HEADS — over windows AND external doors (doors get a head but no cill).
+      var headOpenings=m.openings.filter(function(o){
+        var isWin=/window/i.test(o.type||'')||/^W\d/i.test(o.label)||(!/door|bifold|french/i.test(o.type||'')&&mxFN(o.H)>0.3&&mxFN(o.H)<2.0);
+        var isExtDoor=(/door|bifold|french/i.test(o.type||'')||/^D\d/i.test(o.label)||mxFN(o.H)>=2.0) && wdIsExternal(o);
+        return isWin||isExtDoor;
+      });
+      var headGroups={};
+      headOpenings.forEach(function(o){var w=mxFN(o.W);if(!w)return;var len=Math.ceil((w+0.3)*1000/50)*50;headGroups[len]=(headGroups[len]||0)+(o.qty||1);});
+      Object.keys(headGroups).sort(function(a,b){return a-b;}).forEach(function(len){var qty=headGroups[len];mats.push({cat:'Structural',item:'Cast stone head '+len+'mm',qty:Math.ceil(qty),unit:'nr',note:'Over windows + external doors, width + 300mm bearing',basis:qty+' opening(s)'});});
+    }
+
+    // Head DPC / cavity tray over all openings
+    var totalHeadRun=m.openings.reduce(function(t,o){return t+mxFN(o.W)+0.3;},0);
+    mats.push({cat:'Structural',item:'Head DPC / cavity tray over openings',qty:mxF2(totalHeadRun*MXW),unit:'lin m',note:'Over all lintels',basis:m.openings.length+' openings'});
+    mats.push({cat:'Structural',item:'Weep hole vents',qty:Math.ceil(m.openings.length*2),unit:'nr',note:'2 per opening min',basis:m.openings.length+' openings'});
+
+    // ── Part L: insulated cavity closers to jambs (cavity walls only) ──
+    if(m.wallType==='cavity'){
+      var jambRun=m.openings.reduce(function(t,o){return t+mxFN(o.H)*2;},0); // 2 jambs per opening
+      mats.push({cat:'Structural',item:'Insulated cavity closers (vertical, jambs)',qty:mxF2(jambRun*MXW),unit:'lin m',note:'Thermabate/Dacatie type — closes cavity at window/door jambs, Part L thermal bridging',basis:m.openings.length+' openings x2 jambs'});
+      // ── Part B: vertical cavity fire barriers to reveals ──
+      mats.push({cat:'Structural',item:'Vertical cavity fire barrier to reveals',qty:mxF2(jambRun*MXW),unit:'lin m',note:'Intumescent/mineral wool cavity stop around openings — Part B',basis:m.openings.length+' openings x2 jambs'});
+    }
+  }
+  if(m.wallType!=='timber'){
+    mats.push({cat:'Structural',item:'Wall plate 75x100mm sw',qty:Math.ceil(perim*MXW),unit:'lin m',note:'Bedded in mortar',basis:perim.toFixed(1)+'m'});
+    mats.push({cat:'Structural',item:'Restraint straps 30x5mm galv',qty:Math.ceil(perim/1.2),unit:'nr',note:'1 per 1.2m',basis:perim.toFixed(1)+'m'});
+  }
+  // ── Part B: horizontal cavity fire barrier at each upper floor level (cavity walls) ──
+  if(m.wallType==='cavity' && faFirst>0){
+    mats.push({cat:'Structural',item:'Horizontal cavity fire barrier at floor level',qty:mxF2(perim*MXW),unit:'lin m',note:'Compartment line at first floor — Part B cavity stop',basis:perim.toFixed(1)+'m perimeter'});
+  }
+
+  // \u2500\u2500 FIXINGS & SUNDRIES \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+  // ── RAINWATER GOODS ─────────────────────────────────────────────────────
+  var fasciaRun=m.roofType==='pitched'?(rln+ov*2)*2+(sp+ov*2)*2:perim;
+  var gutterRun=m.roofType==='pitched'?(rln+ov*2)*2:perim;
+  var dpCount=Math.max(2,Math.ceil(gutterRun/12));
+  var dpHeight=mxFN(m.ceilingH)*2*1.2; // two storeys approx x 1.2 for offsets
+  mats.push({cat:'Rainwater Goods',item:'uPVC fascia board 150mm',qty:mxF2(fasciaRun*MXW),unit:'lin m',note:'Eaves + gable ends both sides',basis:fasciaRun.toFixed(1)+'m'});
+  mats.push({cat:'Rainwater Goods',item:'uPVC soffit board 225mm vented',qty:mxF2(fasciaRun*MXW),unit:'lin m',note:'Continuous vented soffit at eaves',basis:fasciaRun.toFixed(1)+'m'});
+  mats.push({cat:'Rainwater Goods',item:'uPVC half-round gutter 112mm',qty:mxF2(gutterRun*MXW),unit:'lin m',note:'Both eaves runs',basis:gutterRun.toFixed(1)+'m'});
+  mats.push({cat:'Rainwater Goods',item:'Gutter angles, stop ends & unions',qty:Math.ceil((4+Math.ceil(gutterRun/4))),unit:'nr',note:'4 corners + unions at 4m centres',basis:'Est.'});
+  mats.push({cat:'Rainwater Goods',item:'uPVC round downpipe 68mm',qty:mxF2(dpCount*dpHeight*MXW),unit:'lin m',note:'Inc. 20% for offsets',basis:dpCount+' downpipes'});
+  mats.push({cat:'Rainwater Goods',item:'Downpipe shoes, offset bends & brackets',qty:Math.ceil(dpCount*3),unit:'nr',note:'Shoe + offset + brackets per downpipe',basis:dpCount+' downpipes'});
+
+
+  // ── SECOND FIX JOINERY ──────────────────────────────────────────────────
+  // Internal doors only — external doors (D01 front, bi-folds, garage, head>=2100) are
+  // priced in the external Windows & Doors package, NOT second-fix joinery.
+  var internalDoors=m.openings.filter(function(o){ return wdType(o)!=='window' && !wdIsExternal(o); });
+  var internalCount=internalDoors.reduce(function(a,o){return a+(o.qty||1);},0);
+  var totalDoorWidth=internalDoors.reduce(function(t,o){return t+mxFN(o.W)*(o.qty||1);},0);
+  // SKIRTING — ext wall internal face x storeys + internal partitions (both faces, factored)
+  // partition run = internal wall area / ceiling height; SK_COVER applies real both-face coverage
+  // (~0.65 of theoretical 2.0) net of kitchen/utility plinths, fitted storage & wall junctions.
+  // Calibrated to Middleham measured take-off (~140m). VALIDATE across house types in sweep.
+  var skStoreys=(faFirst>0)?2:1;
+  var skExtRun=perim*skStoreys;
+  var skIntLen=(cH>0?intWallAreaTotal/cH:0);
+  var SK_COVER=1.3;
+  var skirtingRun=Math.max(0,skExtRun+(skIntLen*SK_COVER)-totalDoorWidth);
+  mats.push({cat:'Second Fix Joinery',item:'Skirting board 18x119mm MDF ogee',qty:mxF2(skirtingRun*MXW),unit:'lin m',note:'Ext perimeter x'+skStoreys+' storeys + internal partitions (both faces, factored) less door openings, +10% waste',basis:skirtingRun.toFixed(1)+'m ('+Math.round(skExtRun)+' ext + '+Math.round(skIntLen*SK_COVER)+' int '+'less '+Math.round(totalDoorWidth)+' doors)'});
+
+  var archRun=internalCount>0
+    ? internalDoors.reduce(function(t,o){return t+(mxFN(o.H)*2+mxFN(o.W))*2*(o.qty||1);},0)
+    : 0;
+  if(archRun===0&&internalCount>0) archRun=internalCount*6.2*2;
+  if(archRun>0) mats.push({cat:'Second Fix Joinery',item:'Architrave 15x69mm MDF ogee',qty:mxF2(archRun*MXW),unit:'lin m',note:'Both sides all internal door openings +10%',basis:internalCount+' doors x2 sides'});
+
+  if(internalCount>0){
+    // One lining per internal door (externals have their own frames in the external package)
+    mats.push({cat:'Second Fix Joinery',item:'Internal door lining set sw',qty:Math.ceil(internalCount),unit:'nr',note:'32x115mm head + 2 legs per door',basis:internalCount+' internal doors'});
+
+    // Fire doors (FD30) — flagged in the schedule notes (e.g. integral-garage door)
+    var fireDoors=internalDoors.filter(function(o){return o.fireDoor;}).reduce(function(a,o){return a+(o.qty||1);},0);
+
+    // Bathroom/WC/en-suite doors — by the door's own location when available, else wet-room count
+    var bathroomDoors, bathBasis;
+    var bLoc=internalDoors.filter(function(o){ if(o.fireDoor) return false; var l=(o.location||wdDoorLocation(o)); return /bath|en[-\s]?suite|ensuite|\bw[\.\/]?c\b|cloak|shower|wet/.test(l); }).reduce(function(a,o){return a+(o.qty||1);},0);
+    if(bLoc>0){ bathroomDoors=Math.min(bLoc,internalCount-fireDoors); bathBasis=bathroomDoors+' wet-room doors (from schedule)'; }
+    else { var wetRooms=mxiWetRoomCount(m); if(wetRooms!==null){ bathroomDoors=Math.min(wetRooms,internalCount-fireDoors); bathBasis=bathroomDoors+' wet rooms (from plans)'; } else { bathroomDoors=Math.max(1,Math.round((internalCount-fireDoors)*0.2)); bathBasis=bathroomDoors+' bathroom doors (est.)'; } }
+
+    var standardDoors=internalCount-fireDoors-bathroomDoors;
+    if(standardDoors<0) standardDoors=0;
+
+    if(standardDoors>0){
+      mats.push({cat:'Second Fix Joinery',item:'Internal door 35mm solid core flush',qty:Math.ceil(standardDoors),unit:'nr',note:'Pre-primed, to be painted',basis:standardDoors+' doors'});
+      mats.push({cat:'Second Fix Joinery',item:'Lever handle on rose satin chrome',qty:Math.ceil(standardDoors),unit:'sets',note:'Pair per door',basis:standardDoors+' doors'});
+      mats.push({cat:'Second Fix Joinery',item:'Tubular latch 63mm',qty:Math.ceil(standardDoors),unit:'nr',note:'1 per door',basis:standardDoors+' doors'});
+      mats.push({cat:'Second Fix Joinery',item:'Door stops floor/wall mounted',qty:Math.ceil(standardDoors),unit:'nr',note:'1 per door',basis:standardDoors+' doors'});
+    }
+    if(bathroomDoors>0){
+      mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom)',qty:Math.ceil(bathroomDoors),unit:'nr',note:'Solid core for privacy',basis:bathBasis});
+      mats.push({cat:'Second Fix Joinery',item:'Bathroom lock set thumb turn & release',qty:Math.ceil(bathroomDoors),unit:'sets',note:'Privacy lock with emergency release',basis:bathBasis});
+      mats.push({cat:'Second Fix Joinery',item:'Bathroom lever handle with indicator bolt',qty:Math.ceil(bathroomDoors),unit:'sets',note:'Engaged/vacant indicator',basis:bathBasis});
+      mats.push({cat:'Second Fix Joinery',item:'Door stops floor/wall mounted',qty:Math.ceil(bathroomDoors),unit:'nr',note:'1 per door',basis:bathBasis});
+    }
+    if(fireDoors>0){
+      mats.push({cat:'Second Fix Joinery',item:'Internal fire door FD30 44mm',qty:Math.ceil(fireDoors),unit:'nr',note:'Half-hour fire rated (e.g. integral garage)',basis:fireDoors+' fire doors'});
+      mats.push({cat:'Second Fix Joinery',item:'Intumescent/smoke seal set',qty:Math.ceil(fireDoors),unit:'sets',note:'Perimeter seal to fire door',basis:fireDoors+' fire doors'});
+      mats.push({cat:'Second Fix Joinery',item:'Overhead door closer',qty:Math.ceil(fireDoors),unit:'nr',note:'Self-closing to fire door',basis:fireDoors+' fire doors'});
+      mats.push({cat:'Second Fix Joinery',item:'Lever handle on rose satin chrome',qty:Math.ceil(fireDoors),unit:'sets',note:'Fire-rated furniture',basis:fireDoors+' fire doors'});
+    }
+    // Hinges — 3 per internal door (incl. bathroom + fire), one consolidated line that ties to the total
+    mats.push({cat:'Second Fix Joinery',item:'Butt hinges 76mm satin (x3)',qty:Math.ceil(internalCount*3),unit:'nr',note:'3 per internal door',basis:internalCount+' doors x3'});
+  }
+
+  mats.push({cat:'Fixings & Sundries',item:'Structural screws 5x100mm',qty:Math.ceil((fa+awa)/10*MXW),unit:'boxes',note:'All structural timber',basis:'By area'});
+  mats.push({cat:'Fixings & Sundries',item:'Round nails 3.1x90mm',qty:Math.ceil((fa+awa)/20*MXW),unit:'boxes',note:'General framing',basis:'By area'});
+  // ── Drywall fixings for plasterboard (walls, ceilings, resilient bars) ──
+  if(m.plaster){
+    var pbArea=(m.wallType==='timber'?awa*2:awa)+fa+faFirst; // wall lining + ceilings
+    mats.push({cat:'Fixings & Sundries',item:'Drywall screws 32mm (1000 box)',qty:Math.ceil(pbArea*30/1000*MXW),unit:'boxes',note:'~30 screws/m2 board to studs/ceilings',basis:pbArea.toFixed(0)+'m2 board'});
+    mats.push({cat:'Fixings & Sundries',item:'Drywall screws 38mm (1000 box)',qty:Math.ceil(pbArea*0.4*12/1000*MXW),unit:'boxes',note:'Second layer / thicker board fixing',basis:pbArea.toFixed(0)+'m2 board'});
+    if(faFirst>0){
+      mats.push({cat:'Fixings & Sundries',item:'Drywall screws 25mm to resilient bars',qty:Math.ceil(faFirst*12/1000*MXW),unit:'boxes',note:'Board to acoustic resilient bars — fine thread',basis:faFirst.toFixed(0)+'m2 ceiling'});
+    }
+  }
+  mats.push({cat:'Fixings & Sundries',item:'Expanding foam 750ml',qty:Math.ceil((m.openings.length*2+perim/5)*MXW),unit:'cans',note:'Around frames',basis:'Openings + perimeter'});
+  mats.push({cat:'Fixings & Sundries',item:'Silicone sealant 310ml',qty:Math.ceil((m.openings.length*2+perim/8)*MXW),unit:'nr',note:'Around all frames',basis:'Openings + perimeter'});
+  mats.push({cat:'Fixings & Sundries',item:'Gutter lubricant / solvent cleaner',qty:Math.max(1,Math.ceil(perim/40*MXW)),unit:'nr',note:'For uPVC rainwater push-fit joints',basis:'Rainwater install'});
+
+
+  // \u2500\u2500 STAIRCASE (new footprint, when an upper floor is added) \u2500\u2500
+  if(m.stairs){
+    mats.push({cat:'Staircase',item:'Softwood staircase \u2014 straight flight, 13 riser (allow)',qty:1,unit:'nr',note:'Standard flight; winders/turn to detail',basis:'1 flight'});
+    mats.push({cat:'Staircase',item:'Balustrade set \u2014 handrail, spindles & newels',qty:1,unit:'set',note:'To match flight',basis:'1 set'});
+    mats.push({cat:'Staircase',item:'Trimmer joists & make good to stairwell (allow)',qty:1,unit:'item',note:'Trimming around new opening',basis:'1 opening'});
+  }
+
+  // \u2500\u2500 EXTENSION JUNCTIONS & TIE-INS (only what joins to the existing house) \u2500\u2500
+  if(m.mode==='extension'){
+    var partyW=m.walls.filter(function(w){return w.cls==='party'||w.cls==='knock';});
+    var knockW=m.walls.filter(function(w){return w.cls==='knock';});
+    var abutLen=partyW.reduce(function(t,w){return t+mxFN(w.L);},0);
+    var abutH=partyW.reduce(function(t,w){return t+mxFN(w.H);},0);
+    if(partyW.length>0){
+      mats.push({cat:'Junctions & Tie-ins',item:'Wall starter profile stainless (full height)',qty:Math.ceil(partyW.length),unit:'nr',note:'Fixed to existing wall at each junction',basis:partyW.length+' junction(s)'});
+      var tieQty=partyW.reduce(function(t,w){return t+Math.ceil(mxFN(w.H)/0.3);},0);
+      mats.push({cat:'Junctions & Tie-ins',item:'Wall starter ties stainless',qty:Math.ceil(tieQty),unit:'nr',note:'At 300mm vertical centres',basis:partyW.length+' junction(s)'});
+      mats.push({cat:'Junctions & Tie-ins',item:'Vertical DPC at abutment',qty:mxF2(abutH*MXW),unit:'lin m',note:'Between new and existing wall',basis:partyW.length+' junction(s)'});
+    }
+    if(abutLen>0){
+      if(m.roofType!=='flat'){
+        mats.push({cat:'Junctions & Tie-ins',item:'Lead flashing code 4 to roof abutment',qty:mxF2(abutLen*MXW),unit:'lin m',note:'Where new roof meets existing wall',basis:abutLen.toFixed(1)+'m abutment'});
+        mats.push({cat:'Junctions & Tie-ins',item:'Stepped cavity tray / DPC over abutment',qty:mxF2(abutLen*MXW),unit:'lin m',note:'Over abutment line',basis:abutLen.toFixed(1)+'m'});
+      } else {
+        mats.push({cat:'Junctions & Tie-ins',item:'Cover flashing & upstand to flat roof abutment',qty:mxF2(abutLen*MXW),unit:'lin m',note:'Where new flat roof meets existing wall',basis:abutLen.toFixed(1)+'m'});
+      }
+    }
+    if(knockW.length>0){
+      mats.push({cat:'Junctions & Tie-ins',item:'Steel beam to knock-through \u2014 size by SE (allow)',qty:knockW.length,unit:'nr',note:'Structural opening between existing & new; engineer to design',basis:knockW.length+' opening(s)'});
+      mats.push({cat:'Junctions & Tie-ins',item:'Padstones / spreaders to beam bearings',qty:Math.ceil(knockW.length*2),unit:'nr',note:'One each bearing',basis:knockW.length+' beam(s)'});
+    }
+    mats.push({cat:'Junctions & Tie-ins',item:'Make good & match existing (brick/render/finishes) (allow)',qty:1,unit:'item',note:'Matching materials & junction making-good',basis:'Allowance'});
+  }
+
+  return mats;
+}
+
+/* ── whole-house model from extraction (unchanged) ── */
+function buildModel(parsed, projName, clientName){
+  var m={proj:projName||'Project',client:clientName||'',mode:'house',
+    wallType:'cavity',roofType:'flat',floorType:'concrete',ceilingH:2.4,
+    studSpacing:400,joistSpacing:400,rafterSpacing:400,plaster:true,
+    walls:[],openings:[],roof:{span:4.0,length:4.0,pitch:15,overhang:.45},floor:{L:4.0,W:4.0},extractedSpec:{}};
+  if(parsed.floor){if(parsed.floor.length_m)m.floor.L=Math.round(parsed.floor.length_m*100)/100;if(parsed.floor.width_m)m.floor.W=Math.round(parsed.floor.width_m*100)/100;if(parsed.floor.ceiling_height_m)m.ceilingH=parsed.floor.ceiling_height_m;}
+  if(parsed.walls&&parsed.walls.length>0){var extH=parsed.floor&&parsed.floor.ext_wall_height_m?parsed.floor.ext_wall_height_m:(m.ceilingH||2.4);m.walls=parsed.walls.filter(function(w){return w.length_m&&w.length_m>0;}).map(function(w){return{label:w.label||'Wall',L:Math.round(w.length_m*1000)/1000,H:w.height_m||extH,ext:w.is_external!==false,gable_area_m2:w.gable_area_m2||0};});}
+  else if(parsed.floor&&parsed.floor.length_m&&parsed.floor.width_m){var L=parsed.floor.length_m,W2=parsed.floor.width_m,H=m.ceilingH||2.4;m.walls=[{label:'Front wall',L:L,H:H,ext:true},{label:'Rear wall',L:L,H:H,ext:true},{label:'Left wall',L:W2,H:H,ext:true},{label:'Right wall',L:W2,H:H,ext:true}];}
+  var op=[];
+  if(parsed.openings&&parsed.openings.length>0){parsed.openings.filter(function(o){return (o.width_m&&o.width_m>0)||o.meter_box||o.type==='meter_box';}).forEach(function(o){op.push({label:o.label||'Opening',W:Math.round((o.width_m||0)*1000)/1000,H:o.height_m||2.1,qty:o.qty||1,type:o.type||'',external:(typeof o.external==='boolean'?o.external:undefined),fireDoor:!!o.fireDoor,location:o.location||'',meter_box:!!o.meter_box});});}
+  if(parsed.extra&&parsed.extra.doors){parsed.extra.doors.filter(function(d){return d.structural_w_mm;}).forEach(function(d){op.push({label:(d.ref||'Door')+' \u2014 '+(d.location||''),W:Math.round(d.structural_w_mm)/1000,H:d.structural_h_mm?Math.round(d.structural_h_mm)/1000:2.1,qty:1,type:(d.type==='bifold'||d.type==='bi-fold')?'bifold':'door'});});}
+  if(parsed.extra&&parsed.extra.windows){parsed.extra.windows.filter(function(w){return w.structural_w_mm;}).forEach(function(w){op.push({label:(w.ref||'Window')+' \u2014 '+(w.location||'')+(w.type==='bay'?' (Bay)':''),W:Math.round(w.structural_w_mm)/1000,H:w.structural_h_mm?Math.round(w.structural_h_mm)/1000:1.05,qty:1,type:'window'});});}
+  if(op.length>0)m.openings=op;
+  // ── Opening cleanup: meter boxes & duplicate misreads ──────────────────────
+  // (a) Tag meter boxes (EO schedule includes the electricity meter box, which is NOT
+  //     a door). (b) Catch the common parser misread where a meter box / spurious entry
+  //     was given a real door's dimensions: an external door whose W×H exactly matches
+  //     another external door in the same location is almost certainly a duplicate.
+  if(m.openings && m.openings.length){
+    m.openings.forEach(function(o){ if(wdIsMeterBox(o)) o._meterBox=true; });
+    var extDoors=m.openings.filter(function(o){var t=wdType(o);return (t==='door'||t==='bifold')&&!o._meterBox&&wdIsExternal(o);});
+    var seen={};
+    extDoors.forEach(function(o){
+      var key=Math.round(mxFN(o.W)*1000)+'x'+Math.round(mxFN(o.H)*1000)+'@'+(o.location||'').toLowerCase();
+      if(seen[key]){ o._dupSuspect=true; }   // identical external door, same room → suspect duplicate
+      else seen[key]=true;
+    });
+    var nMeter=m.openings.filter(function(o){return o._meterBox;}).length;
+    var nDup=m.openings.filter(function(o){return o._dupSuspect;}).length;
+    if(nMeter||nDup){
+      m._openingNote='Openings review: '
+        +(nMeter?nMeter+' meter box(es) excluded from door schedule. ':'')
+        +(nDup?nDup+' external door(s) flagged as possible duplicate (identical size & room — e.g. a meter box read as a patio door). Confirm against the drawing.':'');
+    }
+  }
+  if(parsed.roof){if(parsed.roof.type&&parsed.roof.type!=='unknown')m.roofType=(/flat|warm deck|epdm|single.ply|felt/i.test(parsed.roof.type))?'flat':'pitched';if(parsed.roof.span_m)m.roof.span=Math.round(parsed.roof.span_m*100)/100;if(parsed.roof.length_m)m.roof.length=Math.round(parsed.roof.length_m*100)/100;if(parsed.roof.pitch_degrees)m.roof.pitch=parsed.roof.pitch_degrees;if(parsed.roof.overhang_m)m.roof.overhang=parsed.roof.overhang_m;}
+  // A read pitch >=10 degrees means pitched regardless of any roof_type label noise.
+  if(parsed.roof&&parsed.roof.pitch_degrees&&mxFN(parsed.roof.pitch_degrees)>=10)m.roofType='pitched';
+  if(parsed.wall_construction&&parsed.wall_construction!=='unknown')m.wallType=parsed.wall_construction;
+  if(parsed.floor_construction&&parsed.floor_construction!=='unknown')m.floorType=parsed.floor_construction;
+  var rs=parsed.extra||{};m.extractedSpec={houseType:rs.house_type,client:rs.client,floorAreas:rs.floor_areas,ceilingHeights:rs.ceiling_heights,wallSpec:rs.wall_spec,rooms:rs.rooms||[],doorCount:rs.door_count||0,windowCount:rs.window_count||0,internal_stud_mm:rs.internal_stud_mm,internal_board_mm:rs.internal_board_mm};
+  return m;
+}
+
+/* ── extension model: footprint + per-wall classification (user-confirmed) ── */
+function extOpenings(parsed){
+  var op=[];
+  if(parsed&&parsed.openings){parsed.openings.filter(function(o){return o.width_m;}).forEach(function(o){op.push({label:o.label||'Opening',W:Math.round(o.width_m*1000)/1000,H:o.height_m||2.1,qty:o.qty||1,type:o.type||''});});}
+  if(parsed&&parsed.extra&&parsed.extra.doors){parsed.extra.doors.filter(function(d){return d.structural_w_mm;}).forEach(function(d){op.push({label:(d.ref||'Door')+' \u2014 '+(d.location||''),W:Math.round(d.structural_w_mm)/1000,H:d.structural_h_mm?Math.round(d.structural_h_mm)/1000:2.1,qty:1,type:(d.type==='bifold'||d.type==='bi-fold')?'bifold':'door'});});}
+  if(parsed&&parsed.extra&&parsed.extra.windows){parsed.extra.windows.filter(function(w){return w.structural_w_mm;}).forEach(function(w){op.push({label:(w.ref||'Window')+' \u2014 '+(w.location||''),W:Math.round(w.structural_w_mm)/1000,H:w.structural_h_mm?Math.round(w.structural_h_mm)/1000:1.05,qty:1,type:'window'});});}
+  return op;
+}
+function val(id,d){var e=document.getElementById(id);return e?e.value:d;}
+function buildModelExt(parsed, projName, clientName){
+  var L=parseFloat(val('extL','4'))||4, W=parseFloat(val('extW','3'))||3;
+  var storeys=parseInt(val('extStoreys','1'))||1;
+  var stairs=(document.getElementById('extStairs')||{}).checked||false;
+  var ceilingH=2.4, extH=storeys>=2?(ceilingH*2+0.3):(ceilingH+0.2);
+  function cls(id){return val(id,'new');}
+  var walls=[
+    {label:'Front',L:L,H:extH,ext:true,cls:cls('wcFront')},
+    {label:'Rear',L:L,H:extH,ext:true,cls:cls('wcRear')},
+    {label:'Left',L:W,H:extH,ext:true,cls:cls('wcLeft')},
+    {label:'Right',L:W,H:extH,ext:true,cls:cls('wcRight')}
+  ];
+  var roofType=(parsed&&parsed.roof&&parsed.roof.type&&parsed.roof.type.indexOf('flat')>=0)?'flat':'pitched';
+  var pitch=(parsed&&parsed.roof&&parsed.roof.pitch_degrees)||20;
+  var rs=(parsed&&parsed.extra)||{};
+  return {proj:projName||'Extension',client:clientName||'',mode:'extension',storeys:storeys,stairs:stairs,
+    wallType:'cavity',roofType:roofType,floorType:'concrete',ceilingH:ceilingH,
+    studSpacing:400,joistSpacing:400,rafterSpacing:400,plaster:true,
+    walls:walls,openings:extOpenings(parsed),roof:{span:W,length:L,pitch:pitch,overhang:0.3},floor:{L:L,W:W},
+    extractedSpec:{internal_stud_mm:rs.internal_stud_mm,internal_board_mm:rs.internal_board_mm,floorAreas:{}}};
+}
+
+/* ── project-type toggle ── */
+var projectMode='house';
+function setProjectMode(mode){
+  projectMode=mode;
+  var h=document.getElementById('pmHouse'),x=document.getElementById('pmExt'),s=document.getElementById('extSetup');
+  if(h)h.classList.toggle('on',mode==='house'); if(x)x.classList.toggle('on',mode==='extension');
+  if(s)s.style.display=(mode==='extension')?'block':'none';
+}
+
+/* ── renderers ── */
+function renderScheduleHTML(mats){
+  var cats=[]; mats.forEach(function(x){if(cats.indexOf(x.cat)<0)cats.push(x.cat);});
+  return cats.map(function(cat){
+    var rows=mats.filter(function(x){return x.cat===cat;}).map(function(x){
+      var q=(typeof x.qty==='number')?x.qty.toLocaleString('en-GB'):x.qty;
+      return '<div class="sched-row"><span class="it">'+x.item+'</span><span class="qt">'+q+'</span><span class="un">'+x.unit+'</span></div>';
+    }).join('');
+    return '<div class="sched-cat"><div class="sched-cat-t">'+cat+'</div>'+rows+'</div>';
+  }).join('');
+}
+function schedulePDF(){
+  if(!lastMats) return;
+  var cats=[]; lastMats.forEach(function(x){if(cats.indexOf(x.cat)<0)cats.push(x.cat);});
+  var rows=cats.map(function(cat){
+    var body=lastMats.filter(function(x){return x.cat===cat;}).map(function(x){
+      var q=(typeof x.qty==='number')?x.qty.toLocaleString('en-GB'):x.qty;
+      return '<tr><td style="padding:5px 8px">'+x.item+'</td><td style="padding:5px 8px;text-align:right">'+x.unit+'</td><td style="padding:5px 8px;text-align:right;font-weight:600">'+q+'</td><td style="padding:5px 8px;font-size:10px;color:#888">'+(x.note||'')+'</td></tr>';
+    }).join('');
+    return '<tr style="background:#f3f3f3"><td colspan="4" style="font-weight:700;font-size:10px;text-transform:uppercase;color:#555;padding:6px 8px">'+cat+'</td></tr>'+body;
+  }).join('');
+  var meta=lastMeta||{};
+  var dateStr=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
+  var modeLabel=(lastModel&&lastModel.mode==='extension')?' \u00b7 Extension':'';
+  var head=(meta.project||'Project')+(meta.branch?' \u00b7 Branch '+meta.branch:'')+(meta.houseType?' \u00b7 '+meta.houseType:'')+modeLabel+' \u00b7 '+dateStr;
+  var w=window.open('','_blank'); if(!w){alert('Please allow pop-ups to download the schedule.');return;}
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Materials Schedule \u2014 '+(meta.project||'Project')+'</title></head>'+
+    '<body style="font-family:Georgia,serif;color:#2c2c2a;max-width:900px;margin:30px auto;padding:0 20px">'+
+    '<div style="font-family:\'Arial Black\',Arial,sans-serif;font-size:28px;font-weight:900;letter-spacing:-.03em;color:#143981">MKM</div>'+
+    '<p style="font-size:11px;color:#888;margin:0 0 14px">Materials Take-Off</p>'+
+    '<h1 style="font-size:18px;margin:0 0 3px">Materials Schedule</h1>'+
+    '<p style="font-size:11px;color:#6b6960;margin:0 0 12px">'+head+'</p>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:left">Material</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Unit</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Qty</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:left">Note</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<p style="font-size:10px;color:#888;margin-top:12px;border-top:1px solid #e8e3da;padding-top:8px">All quantities include +10% wastage. Supply schedule for budgeting and merchant pricing.'+((lastModel&&lastModel.mode==="extension")?" Extension take-off \u2014 new footprint only; party/shared walls excluded.":"")+'</p>'+
+    '<p style="font-size:11px;color:#b8964e;font-family:Georgia,serif;margin-top:14px">Powered by Signature QS \u00b7 Signature Construction Projects Ltd</p>'+
+    '</body></html>');
+  w.document.close(); w.onload=function(){w.print();};
+}
+function scheduleCSV(){
+  if(!lastMats) return; var meta=lastMeta||{};
+  function esc(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"';}
+  var csv='Materials Schedule\nProject,'+(meta.project||'')+'\nBranch,'+(meta.branch||'')+'\nClient,'+CLIENT+'\nMode,'+((lastModel&&lastModel.mode)||'house')+'\nDate,'+new Date().toLocaleDateString('en-GB')+'\nWastage,+10%\n\nCategory,Material,Unit,Qty,Note\n';
+  lastMats.forEach(function(x){csv+=[esc(x.cat),esc(x.item),esc(x.unit),esc(x.qty),esc(x.note||'')].join(',')+'\n';});
+  var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='Materials_'+((meta.project||'Project').replace(/\s+/g,'_'))+'.csv';a.click();
+}
+function tile(v,l){return '<div class="res-m"><div class="res-m-v">'+v+'</div><div class="res-m-l">'+l+'</div></div>';}
+
+function showResults(data, fa, doors, windows){
+  window._lastData=data;
+  var results=document.getElementById('results'); results.className='card results show';
+  var BR=(typeof branchNo!=='undefined'&&branchNo)?branchNo.value.trim():'';
+  var projName=document.getElementById('projName').value||data.project_name||'Project';
+
+  if(projectMode==='extension'){
+    lastModel=buildModelExt(data, projName, CLIENT);
+    lastMats=mxiCalc(lastModel);
+    lastMeta={project:projName,branch:BR,houseType:(document.getElementById('houseType').value||'')};
+    var fpA=(lastModel.floor.L*lastModel.floor.W*(lastModel.storeys>=2?2:1));
+    var nNew=lastModel.walls.filter(function(w){return w.cls!=='party'&&w.cls!=='knock';}).length;
+    document.getElementById('resMetrics').innerHTML =
+      tile(fpA.toFixed(1),'Extension m\u00b2')+tile(lastModel.storeys,'Storeys')+tile(nNew,'New walls')+tile(lastModel.openings.length,'Openings');
+    document.getElementById('resSchedule').innerHTML =
+      internalWallPanelHTML()+
+      renderScheduleHTML(lastMats)+
+      '<div class="sched-note">Extension take-off \u2014 new footprint only. Party / shared walls and their foundations are excluded; junction tie-ins and any knock-through beam are listed under "Junctions & Tie-ins" (beam size to be confirmed by a structural engineer). All quantities include +10% wastage.</div>';
+    wireInternalWallPanel();
+    showPricingCard();
+    return;
+  }
+
+  document.getElementById('resMetrics').innerHTML =
+    tile((fa||'\u2014'),'Total m\u00b2')+tile(doors,'Doors')+tile(windows,'Windows')+
+    tile((data.roof&&data.roof.pitch_degrees?data.roof.pitch_degrees+'\u00b0':'\u2014'),'Roof pitch');
+  lastModel=buildModel(data, projName, CLIENT);
+  lastMats=mxiCalc(lastModel);
+  lastMeta={project:projName,branch:BR,houseType:(document.getElementById('houseType').value||'')};
+  renderScheduleAndPanel(data);
+  showPricingCard();
+}
+
+// Renders the schedule + the Internal Walls mix panel, and (re)wires the sliders.
+function renderScheduleAndPanel(data){
+  var warnBits=[]; if(data&&data.missing&&data.missing.length)warnBits.push(data.missing.join('; '));
+  if(lastModel&&lastModel._floorAreaNote)warnBits.push(lastModel._floorAreaNote);
+  if(lastModel&&lastModel._floorAreaNote2)warnBits.push(lastModel._floorAreaNote2); if(lastModel&&lastModel._openingNote)warnBits.push(lastModel._openingNote);
+  var warnHTML=warnBits.length?'<div class="sched-note">Review before ordering: '+warnBits.join(' · ')+'</div>':'';
+  document.getElementById('resSchedule').innerHTML =
+    internalWallPanelHTML()+
+    renderScheduleHTML(lastMats)+
+    '<div class="sched-note">All quantities include +10% wastage. Supply schedule only \u2014 for budgeting and merchant pricing.</div>'+warnHTML;
+  wireInternalWallPanel();
+}
+
+function internalWallPanelHTML(){
+  var a=lastModel&&lastModel._intWallAreas; if(!a) return '';
+  var gPct=Math.round(a.studMixG*100), fPct=Math.round(a.studMixF*100);
+  function bar(label,area,id,pct){
+    return '<div style="margin:10px 0">'
+      +'<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--w);margin-bottom:4px">'
+      +'<span><strong>'+label+'</strong> · '+area.toFixed(1)+' m²</span>'
+      +'<span style="color:var(--mu)"><span id="'+id+'blk">'+(100-pct)+'</span>% block / <span id="'+id+'std">'+pct+'</span>% stud</span></div>'
+      +'<input type="range" min="0" max="100" value="'+pct+'" data-iwmix="'+id+'" '
+      +'style="width:100%;accent-color:var(--mkm-blue,#143981)"/></div>';
+  }
+  return '<div class="card" style="background:rgba(20,57,129,.06);border:1px solid var(--bd);border-radius:8px;padding:12px 14px;margin:0 0 14px">'
+    +'<div style="font-size:13px;font-weight:600;color:var(--w);margin-bottom:2px">Internal walls — block / stud mix</div>'
+    +'<div style="font-size:11px;color:var(--mu);margin-bottom:8px">Default: ground floor blockwork, first floor stud. The split is shown by hatching on the plan — drag to match the drawing. '+(a.measured?'Area measured from plan.':'Area estimated (×'+a.multiplier.toFixed(2)+' from room/door count).')+'</div>'
+    +bar('Ground floor',a.ground,'G',gPct)
+    +bar('First floor',a.first,'F',fPct)
+    +'<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--mu);margin-top:6px">'
+    +'<span>Total internal wall area</span>'
+    +'<input type="number" step="1" min="0" id="iwAreaInput" value="'+a.total.toFixed(0)+'" style="width:70px;text-align:right;padding:3px 6px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:\'DM Sans\',sans-serif;font-size:11px"/>'
+    +'<span>m²'+(a.measured?'':' (estimated — edit if known)')+'</span></div>'
+    +'</div>';
+}
+
+function wireInternalWallPanel(){
+  document.querySelectorAll('[data-iwmix]').forEach(function(el){
+    el.addEventListener('input',function(){
+      var which=this.getAttribute('data-iwmix');
+      var frac=(+this.value)/100;
+      if(which==='G') lastModel._intStudMixGround=frac; else lastModel._intStudMixFirst=frac;
+      document.getElementById(which+'std').textContent=this.value;
+      document.getElementById(which+'blk').textContent=100-(+this.value);
+      lastMats=mxiCalc(lastModel);
+      renderScheduleAndPanel(window._lastData||null);
+      if(typeof renderPricingTable==='function') renderPricingTable();
+    });
+  });
+  var areaEl=document.getElementById('iwAreaInput');
+  if(areaEl){ areaEl.addEventListener('change',function(){
+      var v=parseFloat(this.value)||0;
+      lastModel._intWallAreaOverride=(v>0)?v:null;
+      lastMats=mxiCalc(lastModel);
+      renderScheduleAndPanel(window._lastData||null);
+      if(typeof renderPricingTable==='function') renderPricingTable();
+  }); }
+}
+
+/* ── MKM PRICING & CALL-OFF ─────────────────────────────────────────────── */
+var priceData=[];   // parallel to lastMats: [{rate:Number, weeks:Number}]
+var F0=function(n){return '\u00a3'+(Math.round(n)).toLocaleString('en-GB');};
+var F2=function(n){return '\u00a3'+(Number(n)||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});};
+
+// Plain-English block mapping for the customer summary
+function custBlock(cat){
+  var c=(cat||'').toLowerCase();
+  if(c.indexOf('masonry')>=0||c.indexOf('internal wall')>=0||c.indexOf('structural')>=0||c.indexOf('junction')>=0) return 'Walls & Masonry';
+  if(c.indexOf('floor')>=0) return 'Floors';
+  if(c.indexOf('roof')>=0||c.indexOf('rainwater')>=0) return 'Roof';
+  if(c.indexOf('board')>=0||c.indexOf('lining')>=0||c.indexOf('joinery')>=0||c.indexOf('staircase')>=0) return 'Internal Finishes & Joinery';
+  if(c.indexOf('fixings')>=0||c.indexOf('sundries')>=0) return 'Fixings & Sundries';
+  return 'Other';
+}
+var CUST_BLOCK_ORDER=['Walls & Masonry','Floors','Roof','Internal Finishes & Joinery','Fixings & Sundries','Other'];
+
+function lineQty(x){return (typeof x.qty==='number')?x.qty:(parseFloat(x.qty)||0);}
+function lineTotal(i){
+  if(!lastMats||!lastMats[i]) return 0;
+  var r=(priceData[i]&&priceData[i].rate)||0;
+  return lineQty(lastMats[i])*r;
+}
+function grandTotal(){
+  var t=0; if(lastMats){for(var i=0;i<lastMats.length;i++){t+=lineTotal(i);}} return t;
+}
+
+/* ── Opportunity profit (branch-only) ── */
+var MATERIALS_MARGIN=0.20;          // 20% on materials spend
+var ROOM_MARGIN=0.45;               // 45% on fitted rooms
+var OPP_ROOMS=[                     // sell value per room; profit = sell * ROOM_MARGIN
+  {key:'cloakroom', label:'W.C.', sell:1550},
+  {key:'bathroom',  label:'Bathroom',  sell:4000},
+  {key:'ensuite',   label:'En-suite',  sell:3350},
+  {key:'kitchen',   label:'Kitchen',   sell:12500},
+  {key:'utility',   label:'Utility',   sell:2200}
+];
+var oppCounts=null;  // {cloakroom:n,...} — null until first populated
+
+// classify the extracted room schedule into our five buckets
+function autoRoomCounts(){
+  var c={cloakroom:0,bathroom:0,ensuite:0,kitchen:0,utility:0};
+  var rooms=(lastModel&&lastModel.extractedSpec&&lastModel.extractedSpec.rooms)||[];
+  rooms.forEach(function(r){
+    var name=((typeof r==='string')?r:(r.type||r.name||r.label||'')).toLowerCase();
+    var qty=(r&&r.count)?(parseInt(r.count)||1):1;
+    if(/cloak|\bw[\.\/]?c\b|powder|toilet/.test(name)) c.cloakroom+=qty;
+    else if(/en[-\s]?suite|ensuite/.test(name)) c.ensuite+=qty;
+    else if(/bath|shower\s?room|family bath/.test(name)) c.bathroom+=qty;
+    else if(/utility|laundry/.test(name)) c.utility+=qty;
+    else if(/kitchen/.test(name)) c.kitchen+=qty;
+  });
+  return c;
+}
+
+/* ── Windows & external doors (supply by type + labour slider) ── */
+var WD_WINDOW_PER_M2=425;   // windows: £425/m² supply
+var WD_DOOR_EACH=1450;      // single-leaf front/rear door: £1,450 each
+var WD_BIFOLD_PER_M=1000;   // bifold / sliding: £1,000 per linear metre
+var wdLabourRate=75;        // default; toggle 50/75/100/125
+function wdDoorLocation(o){
+  // location text is carried after the em-dash in the label: "D01 — Front Entrance"
+  var lab=(o.label||''); var idx=lab.indexOf('\u2014');
+  return (idx>=0 ? lab.slice(idx+1) : lab).toLowerCase();
+}
+var WD_EXT_RE=/entrance|front|rear|back\b|patio|garden|french|external|\bext\b|porch|sliding|slider|\bside\b/;
+var WD_INT_RE=/bed|bath|en[-\s]?suite|ensuite|\bw[\.\/]?c\b|cloak|kitchen|utility|hall|landing|lounge|living|dining|study|snug|office|cupboard|\bcpd\b|airing|pantry|internal|\bint\b|dressing|store|plant|garage/;
+// Robust opening type — uses explicit type, else the W/D ref, else the location text.
+function wdIsMeterBox(o){
+  // Electricity/gas meter boxes appear in the EXTERNAL openings schedule (EO-numbered)
+  // but are NOT doors — no leaf, frame or threshold to supply.
+  if(o.meter_box===true || (o.type||'').toLowerCase()==='meter_box') return true; // explicit flag from parser
+  var s=((o.label||'')+' '+(o.location||'')+' '+(o.description||'')+' '+(o.desc||'')).toLowerCase();
+  return /meter\s*box|electric(ity)?\s*meter|\bmeter\b|\bEM\b|gas\s*box|\bMBA\b|wall\s*mounted\s*electric/i.test(s);
+}
+function wdType(o){
+  var t=(o.type||'').toLowerCase();
+  if(t==='window'||t==='bifold'||t==='door') return t;
+  if(/^w/i.test(o.label||'')) return 'window';          // W-ref = window even if type is missing
+  var loc=wdDoorLocation(o);
+  if(/bi[\s-]?fold|slider|sliding/.test(loc)) return 'bifold';
+  return 'door';
+}
+function wdIsExternal(o){
+  if(o._meterBox||o._dupSuspect) return false;          // meter box / suspected duplicate — not a real external door
+  if(wdIsMeterBox(o)) return false;                     // meter box is not an external door
+  var ty=wdType(o);
+  if(ty==='window'||ty==='bifold') return true;        // glazing & bifolds always belong here
+  if(typeof o.external==='boolean') return o.external;  // vector-supplied flag wins (height>=2100, notes, garage)
+  // Schedule prefix is authoritative: EO = External Openings schedule, io = internal openings.
+  // These win over room-name matching (an external front door is located in the "Hall",
+  // a patio door in the "Kitchen" — the room name would otherwise mis-flag them internal).
+  var lbl=(o.label||'').trim();
+  if(/^\s*EO[\s\d]/i.test(lbl)) return true;
+  if(/^\s*io[\s\d]/i.test(lbl)) return false;
+  var loc=wdDoorLocation(o);
+  if(WD_EXT_RE.test(loc)) return true;                 // named external door
+  if(WD_INT_RE.test(loc)) return false;                // named internal door → second fix
+  return false;                                        // ambiguous/blank door → treat as internal
+}
+function externalOpenings(){
+  if(!lastModel||!lastModel.openings) return [];
+  return lastModel.openings.filter(wdIsExternal);
+}
+function internalDoorCount(){
+  if(!lastModel||!lastModel.openings) return 0;
+  return lastModel.openings.filter(function(o){
+    var ty=wdType(o);
+    if(ty==='window'||ty==='bifold') return false;
+    return !wdIsExternal(o);
+  }).reduce(function(a,o){return a+(o.qty||1);},0);
+}
+function wdRef(o,i){
+  var m=(o.label||'').match(/^([WD]\s?\d+)/i);
+  if(m) return m[1].toUpperCase().replace(/\s/,'');
+  var t=(o.type||'').toLowerCase();
+  return (t==='window'?'W':'D')+String(i+1).padStart(2,'0');
+}
+function renderWinDoors(){
+  var panel=document.getElementById('winDoorPanel');
+  if(!panel) return;
+  var ops=externalOpenings();
+  // labour toggle buttons
+  document.getElementById('wdLabourOpts').innerHTML=[50,75,100,125].map(function(r){
+    return '<div class="wdb'+(wdLabourRate===r?' on':'')+'" data-wdlabour="'+r+'">\u00a3'+r+'</div>';
+  }).join('');
+  var rows='<thead><tr style="text-align:left;color:var(--mu);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em">'+
+    '<th style="padding:6px 6px">Ref</th><th style="padding:6px 6px">Type</th><th style="padding:6px 6px;text-align:right">Size (W×H)</th>'+
+    '<th style="padding:6px 6px;text-align:right">m²</th><th style="padding:6px 6px;text-align:right">Supply</th>'+
+    '<th style="padding:6px 6px;text-align:right">Labour</th></tr></thead><tbody>';
+  if(!ops.length){
+    rows+='<tr><td colspan="6" style="padding:10px 6px;color:var(--mu)">No windows or external doors read from the schedule. Add them on the Openings tab and they\u2019ll price here.</td></tr>';
+  }
+  var totSupply=0, totLabour=0, totQty=0;
+  ops.forEach(function(o,i){
+    var w=mxFN(o.W), h=mxFN(o.H), qty=o.qty||1;
+    if(!w||!h) return;
+    var area=w*h*qty;
+    var t=wdType(o);
+    var supply, basis;
+    if(t==='bifold'){
+      supply = w*qty*WD_BIFOLD_PER_M;          // per linear metre of width
+      basis  = '£'+WD_BIFOLD_PER_M+'/lin m';
+    } else if(t==='window'){
+      supply = area*WD_WINDOW_PER_M2;          // per m²
+      basis  = '£'+WD_WINDOW_PER_M2+'/m²';
+    } else {
+      supply = WD_DOOR_EACH*qty;               // single-leaf door, flat each
+      basis  = '£'+WD_DOOR_EACH+' each';
+    }
+    var labour=area*wdLabourRate;
+    totSupply+=supply; totLabour+=labour; totQty+=qty;
+    var typeLabel=t==='window'?'Window':(t==='bifold'?'Bi-fold / sliding':'Ext. door');
+    var sizeStr=Math.round(w*1000)+' × '+Math.round(h*1000)+(qty>1?'  ×'+qty:'');
+    rows+='<tr style="border-top:1px solid rgba(255,255,255,.06)">'+
+      '<td style="padding:6px 6px;font-weight:600">'+wdRef(o,i)+'</td>'+
+      '<td style="padding:6px 6px;color:var(--mu)">'+typeLabel+'</td>'+
+      '<td style="padding:6px 6px;text-align:right">'+sizeStr+'</td>'+
+      '<td style="padding:6px 6px;text-align:right;color:var(--mu)">'+area.toFixed(2)+'</td>'+
+      '<td style="padding:6px 6px;text-align:right">'+F2(supply)+'<div style="font-size:9.5px;color:var(--mu)">'+basis+'</div></td>'+
+      '<td style="padding:6px 6px;text-align:right">'+F2(labour)+'</td></tr>';
+  });
+  rows+='</tbody><tfoot>'+
+    '<tr style="border-top:2px solid var(--bd);font-weight:700">'+
+    '<td style="padding:8px 6px" colspan="4">Total ('+totQty+' openings)</td>'+
+    '<td style="padding:8px 6px;text-align:right;color:#cfe0ff">'+F2(totSupply)+'</td>'+
+    '<td style="padding:8px 6px;text-align:right;color:#cfe0ff">'+F2(totLabour)+'</td></tr>'+
+    '<tr style="font-weight:700"><td style="padding:4px 6px" colspan="5">Supply + labour combined</td>'+
+    '<td style="padding:4px 6px;text-align:right;color:var(--g,#FFCC00);font-size:15px">'+F2(totSupply+totLabour)+'</td></tr>'+
+    (internalDoorCount()>0?'<tr><td colspan="6" style="padding:6px 6px;color:var(--mu);font-size:10.5px">'+internalDoorCount()+' internal door(s) excluded \\u2014 priced in second-fix joinery, not here.</td></tr>':'')+
+    '</tfoot>';
+  document.getElementById('wdTable').innerHTML=rows;
+  // wire labour toggle
+  document.querySelectorAll('[data-wdlabour]').forEach(function(el){
+    el.addEventListener('click',function(){ wdLabourRate=+this.getAttribute('data-wdlabour'); renderWinDoors(); });
+  });
+}
+
+function renderOppProfit(){
+  var panel=document.getElementById('oppProfit');
+  if(!panel) return;
+  if(oppCounts===null) oppCounts=autoRoomCounts();
+  // room count inputs
+  var rc=document.getElementById('roomCounts');
+  rc.innerHTML=OPP_ROOMS.map(function(r){
+    return '<label style="display:flex;align-items:center;gap:.4rem;font-size:11.5px;color:var(--mu)">'+r.label+
+      '<input type="number" min="0" step="1" data-opp="'+r.key+'" value="'+(oppCounts[r.key]||0)+
+      '" style="width:48px;text-align:center;padding:4px 6px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:\'DM Sans\',sans-serif;font-size:12px"/></label>';
+  }).join('');
+  // rows
+  var gt=grandTotal();
+  var matProfit=gt*MATERIALS_MARGIN;
+  var rowsHtml='<tr>'+
+    '<td style="padding:7px 6px;border-bottom:1px solid rgba(255,255,255,.08)">Materials profit <span style="color:var(--mu);font-size:10.5px">('+(MATERIALS_MARGIN*100)+'% of '+F2(gt)+')</span></td>'+
+    '<td style="padding:7px 6px;text-align:right;font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)">'+F2(matProfit)+'</td></tr>';
+  var total=matProfit;
+  OPP_ROOMS.forEach(function(r){
+    var n=oppCounts[r.key]||0;
+    var per=r.sell*ROOM_MARGIN;
+    var sub=per*n;
+    total+=sub;
+    var dim=n>0?'':'opacity:.45';
+    rowsHtml+='<tr style="'+dim+'">'+
+      '<td style="padding:7px 6px;border-bottom:1px solid rgba(255,255,255,.06)">'+r.label+' profit '+
+        '<span style="color:var(--mu);font-size:10.5px">('+n+' \u00d7 '+F2(per)+')</span></td>'+
+      '<td style="padding:7px 6px;text-align:right;font-weight:600;border-bottom:1px solid rgba(255,255,255,.06)">'+F2(sub)+'</td></tr>';
+  });
+  document.getElementById('oppRows').innerHTML=rowsHtml;
+  document.getElementById('oppTotal').textContent=F2(total);
+  // wire count inputs
+  document.querySelectorAll('[data-opp]').forEach(function(el){
+    el.addEventListener('input',function(){
+      oppCounts[this.getAttribute('data-opp')]=parseInt(this.value)||0;
+      renderOppProfit();
+    });
+  });
+}
+
+function initPriceData(){
+  priceData=[];
+  if(!lastMats) return;
+  for(var i=0;i<lastMats.length;i++){priceData.push({rate:0,weeks:1});}
+}
+
+function weeksSelect(i){
+  var cur=(priceData[i]&&priceData[i].weeks)||1;
+  var o='';
+  for(var w=1;w<=12;w++){o+='<option value="'+w+'"'+(w===cur?' selected':'')+'>'+w+' wk'+(w>1?'s':'')+'</option>';}
+  return '<select data-i="'+i+'" class="pc-weeks" style="padding:4px 6px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:\'DM Sans\',sans-serif;font-size:11px">'+o+'</select>';
+}
+
+function renderPricingTable(){
+  if(!lastMats){document.getElementById('pricingTable').innerHTML='';return;}
+  var cats=[]; lastMats.forEach(function(x){if(cats.indexOf(x.cat)<0)cats.push(x.cat);});
+  var html='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:620px">';
+  html+='<thead><tr>'+
+    '<th style="text-align:left;padding:6px 8px;color:var(--mu);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bd)">Material</th>'+
+    '<th style="text-align:right;padding:6px 8px;color:var(--mu);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bd)">Qty</th>'+
+    '<th style="text-align:left;padding:6px 8px;color:var(--mu);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bd)">Unit</th>'+
+    '<th style="text-align:right;padding:6px 8px;color:var(--mu);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bd)">Rate \u00a3</th>'+
+    '<th style="text-align:right;padding:6px 8px;color:var(--mu);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bd)">Total</th>'+
+    '<th style="text-align:center;padding:6px 8px;color:var(--mu);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--bd)">Call-off</th>'+
+    '</tr></thead><tbody>';
+  cats.forEach(function(cat){
+    html+='<tr><td colspan="6" style="background:rgba(20,57,129,.12);color:#cfe0ff;font-weight:700;font-size:10px;text-transform:uppercase;padding:5px 8px">'+cat+'</td></tr>';
+    lastMats.forEach(function(x,i){
+      if(x.cat!==cat) return;
+      var q=lineQty(x);
+      html+='<tr>'+
+        '<td style="padding:5px 8px;border-bottom:1px solid rgba(255,255,255,.05)">'+x.item+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid rgba(255,255,255,.05)">'+(typeof x.qty==='number'?x.qty.toLocaleString('en-GB'):x.qty)+'</td>'+
+        '<td style="padding:5px 8px;color:var(--mu);border-bottom:1px solid rgba(255,255,255,.05)">'+x.unit+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid rgba(255,255,255,.05)"><input type="number" step="0.01" min="0" data-i="'+i+'" class="pc-rate" value="'+((priceData[i]&&priceData[i].rate)||'')+'" placeholder="0.00" style="width:78px;text-align:right;padding:4px 6px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:\'DM Sans\',sans-serif;font-size:11px"/></td>'+
+        '<td style="padding:5px 8px;text-align:right;font-weight:600;border-bottom:1px solid rgba(255,255,255,.05)" id="pcTot'+i+'">'+F2(lineTotal(i))+'</td>'+
+        '<td style="padding:5px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,.05)">'+weeksSelect(i)+'</td>'+
+        '</tr>';
+    });
+  });
+  html+='</tbody><tfoot><tr>'+
+    '<td colspan="4" style="padding:8px;text-align:right;font-weight:700;border-top:2px solid var(--bd)">Grand total (ex VAT)</td>'+
+    '<td style="padding:8px;text-align:right;font-weight:700;color:var(--g);border-top:2px solid var(--bd)" id="pcGrand">'+F2(grandTotal())+'</td>'+
+    '<td style="border-top:2px solid var(--bd)"></td></tr></tfoot></table></div>';
+  document.getElementById('pricingTable').innerHTML=html;
+
+  // wire inputs
+  document.querySelectorAll('.pc-rate').forEach(function(el){
+    el.addEventListener('input',function(){
+      var i=+this.getAttribute('data-i');
+      if(!priceData[i])priceData[i]={rate:0,weeks:1};
+      priceData[i].rate=parseFloat(this.value)||0;
+      document.getElementById('pcTot'+i).textContent=F2(lineTotal(i));
+      document.getElementById('pcGrand').textContent=F2(grandTotal());
+      renderOppProfit();
+    });
+  });
+  document.querySelectorAll('.pc-weeks').forEach(function(el){
+    el.addEventListener('change',function(){
+      var i=+this.getAttribute('data-i');
+      if(!priceData[i])priceData[i]={rate:0,weeks:1};
+      priceData[i].weeks=parseInt(this.value)||1;
+    });
+  });
+}
+
+/* PDF shell shared by all three docs */
+function mkmDocOpen(titleText, headLine, bodyHTML, footNote){
+  var w=window.open('','_blank'); if(!w){alert('Please allow pop-ups to download the document.');return;}
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+titleText+'</title></head>'+
+    '<body style="font-family:Georgia,serif;color:#2c2c2a;max-width:900px;margin:30px auto;padding:0 20px">'+
+    '<div style="font-family:\'Arial Black\',Arial,sans-serif;font-size:28px;font-weight:900;letter-spacing:-.03em;color:#143981">MKM</div>'+
+    '<p style="font-size:11px;color:#888;margin:0 0 14px">Materials Take-Off</p>'+
+    '<h1 style="font-size:18px;margin:0 0 3px">'+titleText+'</h1>'+
+    '<p style="font-size:11px;color:#6b6960;margin:0 0 12px">'+headLine+'</p>'+
+    bodyHTML+
+    '<p style="font-size:10px;color:#888;margin-top:12px;border-top:1px solid #e8e3da;padding-top:8px">'+footNote+'</p>'+
+    '<p style="font-size:11px;color:#b8964e;font-family:Georgia,serif;margin-top:14px">Powered by Signature QS \u00b7 in partnership with MKM Building Supplies</p>'+
+    '</body></html>');
+  w.document.close(); w.onload=function(){w.print();};
+}
+function docHeadLine(){
+  var meta=lastMeta||{};
+  var dateStr=new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
+  var modeLabel=(lastModel&&lastModel.mode==='extension')?' \u00b7 Extension':'';
+  return (meta.project||'Project')+(meta.branch?' \u00b7 Branch '+meta.branch:'')+(meta.houseType?' \u00b7 '+meta.houseType:'')+modeLabel+' \u00b7 '+dateStr;
+}
+
+/* DOC 1 — MKM priced schedule (full detail + rate/total/call-off + grand total) */
+function pdfMkmPricedFn(){
+  if(!lastMats) return;
+  var cats=[]; lastMats.forEach(function(x){if(cats.indexOf(x.cat)<0)cats.push(x.cat);});
+  var rows=cats.map(function(cat){
+    var body=lastMats.map(function(x,i){
+      if(x.cat!==cat) return '';
+      var q=(typeof x.qty==='number')?x.qty.toLocaleString('en-GB'):x.qty;
+      var r=(priceData[i]&&priceData[i].rate)||0;
+      var wk=(priceData[i]&&priceData[i].weeks)||1;
+      return '<tr><td style="padding:5px 8px">'+x.item+'</td>'+
+        '<td style="padding:5px 8px;text-align:right">'+x.unit+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-weight:600">'+q+'</td>'+
+        '<td style="padding:5px 8px;text-align:right">'+(r?F2(r):'\u2014')+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-weight:600">'+(r?F2(lineTotal(i)):'\u2014')+'</td>'+
+        '<td style="padding:5px 8px;text-align:center">'+wk+' wk'+(wk>1?'s':'')+'</td></tr>';
+    }).join('');
+    return '<tr style="background:#f3f3f3"><td colspan="6" style="font-weight:700;font-size:10px;text-transform:uppercase;color:#555;padding:6px 8px">'+cat+'</td></tr>'+body;
+  }).join('');
+  var grand=grandTotal();
+  var tbl='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:left">Material</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Unit</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Qty</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Rate</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Total</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:center">Call-off</th></tr></thead><tbody>'+rows+
+    '<tr><td colspan="4" style="padding:8px;text-align:right;font-weight:700;border-top:2px solid #143981">Grand total (ex VAT)</td>'+
+    '<td style="padding:8px;text-align:right;font-weight:700;color:#143981;border-top:2px solid #143981">'+F2(grand)+'</td>'+
+    '<td style="border-top:2px solid #143981"></td></tr></tbody></table>';
+  mkmDocOpen('Priced Materials Schedule', docHeadLine(), tbl,
+    'All quantities include +10% wastage. Rates entered by MKM. Prices exclude VAT. Call-off periods indicative \u2014 confirm stock and lead times with branch.');
+}
+
+/* DOC 2 — Customer cost summary (plain blocks, totals only, no quantities) */
+function pdfCustSummaryFn(){
+  if(!lastMats) return;
+  var blocks={}; CUST_BLOCK_ORDER.forEach(function(b){blocks[b]=0;});
+  lastMats.forEach(function(x,i){ blocks[custBlock(x.cat)] += lineTotal(i); });
+  var grand=grandTotal();
+  var rows=CUST_BLOCK_ORDER.filter(function(b){return blocks[b]>0;}).map(function(b){
+    return '<tr><td style="padding:9px 10px;font-size:13px">'+b+'</td>'+
+      '<td style="padding:9px 10px;text-align:right;font-size:13px;font-weight:600">'+F0(blocks[b])+'</td></tr>';
+  }).join('');
+  var tbl='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+
+    '<th style="background:#143981;color:#fff;padding:8px 10px;text-align:left">Element</th>'+
+    '<th style="background:#143981;color:#fff;padding:8px 10px;text-align:right">Estimated cost</th></tr></thead><tbody>'+rows+
+    '<tr><td style="padding:11px 10px;font-weight:700;font-size:14px;border-top:2px solid #143981">Total materials (ex VAT)</td>'+
+    '<td style="padding:11px 10px;text-align:right;font-weight:700;font-size:14px;color:#143981;border-top:2px solid #143981">'+F0(grand)+'</td></tr>'+
+    '<tr><td style="padding:6px 10px;font-size:11px;color:#888">VAT @ 20%</td><td style="padding:6px 10px;text-align:right;font-size:11px;color:#888">'+F0(grand*0.2)+'</td></tr>'+
+    '<tr><td style="padding:6px 10px;font-weight:700;font-size:13px">Total inc VAT</td><td style="padding:6px 10px;text-align:right;font-weight:700;font-size:13px;color:#143981">'+F0(grand*1.2)+'</td></tr>'+
+    '</tbody></table>';
+  mkmDocOpen('Materials Cost Summary', docHeadLine(), tbl,
+    'Indicative materials cost for budgeting, broken down by element. Based on current MKM pricing and subject to confirmation. Excludes labour, plant and delivery unless stated. A full itemised schedule is available on request.');
+}
+
+/* DOC 3 — Builder materials list (full list, no prices, call-off + order line) */
+function pdfBuilderListFn(){
+  if(!lastMats) return;
+  var meta=lastMeta||{};
+  var orderLine=(document.getElementById('orderLine')&&document.getElementById('orderLine').value.trim())||'';
+  var cats=[]; lastMats.forEach(function(x){if(cats.indexOf(x.cat)<0)cats.push(x.cat);});
+  var rows=cats.map(function(cat){
+    var body=lastMats.map(function(x,i){
+      if(x.cat!==cat) return '';
+      var q=(typeof x.qty==='number')?x.qty.toLocaleString('en-GB'):x.qty;
+      var wk=(priceData[i]&&priceData[i].weeks)||1;
+      return '<tr><td style="padding:5px 8px">'+x.item+'</td>'+
+        '<td style="padding:5px 8px;text-align:right">'+x.unit+'</td>'+
+        '<td style="padding:5px 8px;text-align:right;font-weight:600">'+q+'</td>'+
+        '<td style="padding:5px 8px;text-align:center">'+wk+' wk'+(wk>1?'s':'')+'</td></tr>';
+    }).join('');
+    return '<tr style="background:#f3f3f3"><td colspan="4" style="font-weight:700;font-size:10px;text-transform:uppercase;color:#555;padding:6px 8px">'+cat+'</td></tr>'+body;
+  }).join('');
+  var orderBox = orderLine ?
+    '<div style="background:#FFF7D6;border:1px solid #FFCC00;border-radius:6px;padding:10px 14px;margin:0 0 14px;font-size:12px"><strong>To order:</strong> call MKM'+(meta.branch?' (Branch '+meta.branch+')':'')+' on <strong>'+orderLine+'</strong>. Quote the project name and call off each item per the lead times shown below.</div>'
+    : (meta.branch?'<div style="background:#FFF7D6;border:1px solid #FFCC00;border-radius:6px;padding:10px 14px;margin:0 0 14px;font-size:12px"><strong>To order:</strong> contact MKM Branch '+meta.branch+'. Call off each item per the lead times shown below.</div>':'');
+  var tbl=orderBox+'<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:left">Material</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Unit</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:right">Qty</th>'+
+    '<th style="background:#143981;color:#fff;padding:6px 8px;text-align:center">Call-off</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  mkmDocOpen('Materials List for Ordering', docHeadLine(), tbl,
+    'Full materials list including +10% wastage. Call-off period shows how far ahead of need each item should be ordered. Confirm stock and current lead times with the branch when ordering.');
+}
+
+/* ── end pricing section ── */
+
+function showPricingCard(){
+  if(!lastMats){return;}
+  initPriceData();
+  oppCounts=null;  // re-read room counts from the freshly analysed plans
+  document.getElementById('pricingCard').style.display='';
+  document.getElementById('pricingCard').classList.add('show');
+  renderPricingTable();
+  renderWinDoors();
+  renderOppProfit();
+  renderBudget();
+}
+
+document.getElementById('pdfBtn').addEventListener('click', schedulePDF);
+document.getElementById('csvBtn').addEventListener('click', scheduleCSV);
+document.getElementById('pdfMkmPriced').addEventListener('click', pdfMkmPricedFn);
+document.getElementById('pdfCustSummary').addEventListener('click', pdfCustSummaryFn);
+document.getElementById('pdfBuilderList').addEventListener('click', pdfBuilderListFn);
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BUILDER BUDGET — instant build cost driven by GIFA.
+   £/ft² rates are a QS-only setting (hidden in Builder view, where the cost
+   reads as a take-off from the drawing). Two silent floor-checks compare the
+   GIFA budget against measured quantities from the analysed model.
+   ══════════════════════════════════════════════════════════════════════════ */
+var FT2_PER_M2 = 10.7639;
+var budgetView = 'qs';
+var budgetGifaOverride = null;
+
+var BUD = {
+  materials:[
+    {k:'super',  label:'Superstructure',  note:'', rate:22.00, det:{kind:'list', items:['Bricks','Blocks','Mortar','Lintels','Heads','Cills','Joists','Deck','Roof trusses','Soffits','Fascias','Rainwater goods']}},
+    {k:'ground', label:'Groundworks',     note:'incl. materials', rate:12.00, det:{kind:'stage', parts:[['Foundations',45],['Brickwork in foundation',22],['Plot services',6],['Setting out',8],['Site strip',10],['Scaffold base',9]]}},
+    {k:'bb',     label:'Beam &amp; block',    note:'materials + labour + screed', rate:4.80},
+    {k:'int',    label:'Internals',        note:'materials', rate:5.70, det:{kind:'list', items:['Stairs','1st fix timber pack','2nd fix timber pack','Internal doors','Ironmongery']}}
+  ],
+  trades:[
+    {k:'masonry',label:'Masonry labour',   note:'', rate:13.00, det:{kind:'stage', parts:[['1st lift',42],['2nd lift',42],['Top out',16]]}},
+    {k:'kitchen',label:'Kitchens',         note:'', rate:10.00, det:{kind:'list', items:['Cabinetry','Appliances','Worktops','Sink','Taps']}},
+    {k:'plumb',  label:'Plumbing',         note:'incl. boiler, heating, wastes; excl. bathroom contents', rate:9.50},
+    {k:'wd',     label:'Windows &amp; doors',  note:'', rate:9.50},
+    {k:'plaster',label:'Plastering',       note:'', rate:7.00},
+    {k:'elec',   label:'Electrics',        note:'supply + fix, incl. garage &amp; EV', rate:6.50},
+    {k:'roof',   label:'Roofing',          note:'incl. materials', rate:6.00},
+    {k:'carp',   label:'Carpentry / joinery', note:'', rate:5.50, det:{kind:'stage', parts:[['Joist & deck',18],['Roof',20],['1st fix',27],['2nd fix',19],['Final',16]]}},
+    {k:'tile',   label:'Tiling labour',    note:'', rate:3.75},
+    {k:'decor',  label:'Decorating',       note:'', rate:2.95},
+    {k:'loft',   label:'Loft insulation',  note:'', rate:0.85}
+  ],
+  oneoffs:[
+    {k:'services',label:'Services connection',            amt:5000},
+    {k:'bc',      label:'Building Control &amp; warranties',  amt:3500},
+    {k:'sewer',   label:'Sewer connection',               amt:1500}
+  ],
+  prelimPct:10,
+  oandpPct:15
+};
+
+var BUD_STAGES = [
+  {src:'trades',   key:'masonry', label:'Brickwork',   parts:[['1st lift',42],['2nd lift',42],['Top out',16]]},
+  {src:'trades',   key:'carp',    label:'Joinery',     parts:[['Joist & deck',18],['Roof',20],['1st fix',27],['2nd fix',19],['Final',16]]},
+  {src:'materials',key:'ground',  label:'Groundworks', parts:[['Foundations',45],['Brickwork in foundation',22],['Plot services',6],['Setting out',8],['Site strip',10],['Scaffold base',9]]}
+];
+
+var CHK = { blockM2:20, brickM2:51, winM2:570, doorEach:1570, bifoldSupplyM:1000, bifoldLabourEach:500 };
+
+function budGifaFt2(){
+  if(budgetGifaOverride!=null && budgetGifaOverride>0) return budgetGifaOverride;
+  var m=lastModel, m2=0;
+  if(m && m.extractedSpec && m.extractedSpec.floorAreas){
+    var f=m.extractedSpec.floorAreas;
+    m2 = mxFN(f.total_m2) || ((mxFN(f.ground_m2)||0)+(mxFN(f.first_m2)||0));
+  }
+  if(!m2 && m){ m2 = mxiFA(m) * (m.storeys>=2?2:1); }
+  return m2 * FT2_PER_M2;
+}
+
+function budMasonryCheck(){
+  if(!lastModel) return 0;
+  var block = mxiAWA(lastModel) || 0;
+  var brick = (lastModel.wallType==='cavity') ? (mxiEWN(lastModel)||0) : 0;
+  if(lastModel.wallType==='solid') block = block*2;
+  return block*CHK.blockM2 + brick*CHK.brickM2;
+}
+function budWinDoorCheck(){
+  var ops = (typeof externalOpenings==='function') ? externalOpenings() : [];
+  var glaze=0, doors=0, bifoldM=0, bifoldN=0, total=0;
+  ops.forEach(function(o){
+    var w=mxFN(o.W), h=mxFN(o.H), q=o.qty||1, t=wdType(o), area=w*h*q;
+    if(!w||!h) return;
+    // Measure against the SAME rates the priced panel uses, so the check can never
+    // disagree with the Windows & external doors panel (supply + labour).
+    var supply;
+    if(t==='bifold'){ bifoldM += w*q; bifoldN += q; supply = w*q*WD_BIFOLD_PER_M; }
+    else if(t==='window'){ glaze += area; supply = area*WD_WINDOW_PER_M2; }
+    else { doors += q; supply = WD_DOOR_EACH*q; }
+    total += supply + area*wdLabourRate;
+  });
+  return { total: total, glaze:glaze, doors:doors, bifoldM:bifoldM, bifoldN:bifoldN };
+}
+
+function setBudgetView(v){ budgetView=v; renderBudget(); }
+
+function renderBudget(){
+  var panel=document.getElementById('budgetPanel');
+  if(!panel || !lastModel){ if(panel) panel.innerHTML=''; return; }
+  var builder = (budgetView==='builder');
+  var gifa = budGifaFt2();
+
+  var matRate=0; BUD.materials.forEach(function(r){matRate+=r.rate;});
+  var trRate=0;  BUD.trades.forEach(function(r){trRate+=r.rate;});
+  var matTot=matRate*gifa, trTot=trRate*gifa, build=matTot+trTot;
+  var prelimGen=build*BUD.prelimPct/100;
+  var oneoff=0; BUD.oneoffs.forEach(function(r){oneoff+=r.amt;});
+  var prelim=prelimGen+oneoff;
+  var preOP=build+prelim;
+  var oandp=preOP*BUD.oandpPct/100;
+  var total=preOP+oandp;
+  var perFt=gifa>0?total/gifa:0;
+
+  function rateRows(list,kind){
+    return list.map(function(r,i){
+      var amt=r.rate*gifa;
+      var rateCell = builder ? '' :
+        '<span class="bri"><span class="brp">£</span><input type="number" min="0" step="0.05" value="'+r.rate.toFixed(2)+'" data-bk="'+kind+'" data-bi="'+i+'"><span class="bru">/ft²</span></span>';
+      var row='<div class="brow'+(builder?' bv':'')+'"><span class="brl">'+r.label+(r.note?'<small>'+r.note+'</small>':'')+'</span>'+
+        rateCell+'<span class="brv" id="bud-'+kind+'-'+i+'">'+F0(amt)+'</span></div>';
+      var det='';
+      if(r.det && r.det.kind==='list'){
+        det='<div class="bdet">incl. '+r.det.items.join(' · ')+'</div>';
+      } else if(r.det && r.det.kind==='stage'){
+        det='<div class="bdet bstage">'+r.det.parts.map(function(p){
+          return '<div class="bdl"><span>'+p[0]+' <em>'+p[1]+'%</em></span><span>'+F0(amt*p[1]/100)+'</span></div>';
+        }).join('')+'</div>';
+      }
+      return row+det;
+    }).join('');
+  }
+
+  var mChk=budMasonryCheck(), mBud=(BUD.trades.find(function(x){return x.k==='masonry';}).rate)*gifa;
+  var wd=budWinDoorCheck(), wdBud=(BUD.trades.find(function(x){return x.k==='wd';}).rate)*gifa;
+  function chkRow(label,detail,budv,chkv){
+    var ok=budv>=chkv;
+    return '<div class="bchk '+(ok?'ok':'warn')+'"><div><strong>'+label+'</strong> '+(ok?'✓ within budget':'⚠ measured exceeds budget')+
+      '<div class="bchk-d">'+detail+'</div></div>'+
+      '<div class="bchk-n">budget '+F0(budv)+'<br>measured '+F0(chkv)+'</div></div>';
+  }
+
+  panel.innerHTML =
+    '<style>'+
+    '.bud-head{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem}'+
+    '.bud-tog{display:flex;gap:.4rem}'+
+    '.bud-tog button{padding:.45rem .8rem;border:1px solid var(--bd);border-radius:6px;background:rgba(255,255,255,.04);color:var(--mu);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}'+
+    '.bud-tog button.on{background:var(--spinks);border-color:var(--spinks);color:#fff}'+
+    '.brow{display:grid;grid-template-columns:1fr 86px 92px;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid rgba(255,255,255,.04)}'+
+    '.brow.bv{grid-template-columns:1fr 100px}'+
+    '.brl{font-size:12.5px;color:var(--w)}.brl small{display:block;font-size:10px;color:var(--mu);margin-top:1px}'+
+    '.bri{position:relative}.bri input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--bd);border-radius:6px;padding:.45rem .5rem .45rem 1.2rem;color:var(--w);font-size:12px;font-family:inherit;text-align:right}'+
+    '.bri .brp{position:absolute;left:.45rem;top:50%;transform:translateY(-50%);font-size:11px;color:var(--mu)}'+
+    '.bri .bru{position:absolute;right:.5rem;bottom:-11px;font-size:8.5px;color:var(--mu);text-transform:uppercase}'+
+    '.brv{font-size:12.5px;color:var(--g);text-align:right;font-weight:600;font-variant-numeric:tabular-nums}'+
+    '.bsub{display:flex;justify-content:space-between;padding:.55rem 0;font-size:12.5px;border-top:1px solid var(--bd);margin-top:.5rem;font-weight:600}'+
+    '.bsub .v{color:var(--g);font-variant-numeric:tabular-nums}'+
+    '.bud-sec-t{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mu);margin:1.3rem 0 .5rem}'+
+    '.bpct{display:flex;align-items:center;gap:.6rem;margin:.4rem 0}.bpct label{flex:1;font-size:12.5px}.bpct label small{display:block;font-size:10.5px;color:var(--mu)}'+
+    '.bpct .pi{position:relative;width:84px}.bpct .pi input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--bd);border-radius:6px;padding:.45rem 1.1rem .45rem .5rem;color:var(--g);font-size:13px;font-weight:600;font-family:inherit;text-align:right}.bpct .pi .pp{position:absolute;right:.5rem;top:50%;transform:translateY(-50%);font-size:12px;color:var(--mu)}'+
+    '.boff{display:grid;grid-template-columns:1fr 110px;gap:.5rem;align-items:center;padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px}'+
+    '.boff .pi{position:relative}.boff .pi input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--bd);border-radius:6px;padding:.45rem .5rem .45rem 1.2rem;color:var(--w);font-size:12px;font-family:inherit;text-align:right}.boff .pi .pp{position:absolute;left:.5rem;top:50%;transform:translateY(-50%);font-size:11px;color:var(--mu)}'+
+    '.bmetrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:.6rem;margin:1rem 0}'+
+    '.bm{background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:8px;padding:.7rem;text-align:center}.bm.hero{background:var(--spinks);border-color:var(--spinks)}'+
+    '.bm-v{font-size:18px;font-weight:600;color:var(--g);font-variant-numeric:tabular-nums}.bm.hero .bm-v{color:#fff}.bm-l{font-size:10px;color:var(--mu);margin-top:2px}.bm.hero .bm-l{color:rgba(255,255,255,.7)}'+
+    '.bstg{margin-bottom:.9rem}.bstg-t{display:flex;justify-content:space-between;font-size:12px;font-weight:600;color:#cfe0ff;padding:.35rem 0;border-bottom:1px solid var(--bd)}.bstg-t span:last-child{color:var(--g)}'+
+    '.bstg-l{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mu);padding:.28rem 0;border-bottom:1px solid rgba(255,255,255,.04)}.bstg-l span:last-child{color:var(--w);font-variant-numeric:tabular-nums}.bstg-l em{color:#5a606e;font-style:normal;font-size:9.5px;margin-left:.3rem}'+
+    '.bchk{display:flex;justify-content:space-between;gap:.75rem;padding:.6rem .75rem;border-radius:7px;margin-bottom:.5rem;font-size:11.5px;line-height:1.45}'+
+    '.bchk.ok{background:rgba(90,154,76,.1);border:1px solid rgba(90,154,76,.35);color:#bfe0b4}'+
+    '.bchk.warn{background:rgba(255,204,0,.1);border:1px solid rgba(255,204,0,.4);color:var(--g)}'+
+    '.bchk-d{color:var(--mu);font-size:10.5px;margin-top:2px}.bchk-n{text-align:right;color:var(--mu);font-size:10.5px;white-space:nowrap}'+
+    '.bdet{font-size:10.5px;color:var(--mu);line-height:1.5;padding:.15rem 0 .5rem .2rem;border-bottom:1px solid rgba(255,255,255,.04)}'+
+    '.bdet.bstage{padding:.25rem 0 .5rem}'+
+    '.bdl{display:flex;justify-content:space-between;padding:.22rem 0 .22rem .9rem;border-left:2px solid var(--bd);margin-left:.1rem}'+
+    '.bdl span:last-child{color:var(--w);font-variant-numeric:tabular-nums}.bdl em{color:#5a606e;font-style:normal;font-size:9.5px;margin-left:.3rem}'+
+    '</style>'+
+    '<div class="bud-head"><div style="font-weight:700;color:var(--w);font-size:14px">Build budget'+(builder?'':' <span style="font-size:11px;color:var(--mu);font-weight:400">— QS setup; rates hidden in Builder view</span>')+'</div>'+
+      '<div class="bud-tog"><button class="'+(builder?'':'on')+'" onclick="setBudgetView(\'qs\')">QS setup</button><button class="'+(builder?'on':'')+'" onclick="setBudgetView(\'builder\')">Builder view</button></div></div>'+
+
+    '<div class="boff" style="border:none;padding-bottom:.2rem"><span><strong>GIFA</strong> <small style="color:var(--mu);font-size:10.5px">'+(budgetGifaOverride!=null?'manual override':'from drawing')+' · '+(gifa/FT2_PER_M2).toFixed(1)+' m²</small></span>'+
+      '<div class="pi"><input type="number" min="0" step="10" value="'+Math.round(gifa)+'" id="budGifa"><span class="pp" style="left:auto;right:.5rem;font-size:9px">ft²</span></div></div>'+
+
+    (builder?'<div class="bud-sec-t">Materials</div>':'<div class="bud-sec-t">Materials · £/ft²</div>')+
+    rateRows(BUD.materials,'materials')+
+    (builder?'<div class="bud-sec-t">Trade labour &amp; fit</div>':'<div class="bud-sec-t">Trade labour &amp; fit · £/ft²</div>')+
+    rateRows(BUD.trades,'trades')+
+    '<div class="bsub"><span>Build subtotal</span><span class="v">'+F0(build)+'</span></div>'+
+
+    '<div class="bud-sec-t">Preliminaries</div>'+
+    (builder?'':'<div class="bpct"><label>General prelims <small>scaffold, welfare, plant, site mgmt</small></label><div class="pi"><input type="number" min="0" step="0.5" value="'+BUD.prelimPct+'" id="budPrelimPct"><span class="pp">%</span></div></div>')+
+    BUD.oneoffs.map(function(r,i){return '<div class="boff"><span>'+r.label+'</span><div class="pi"><span class="pp">£</span>'+(builder?'<span style="display:block;text-align:right;padding:.45rem .5rem;font-size:12px">'+r.amt.toLocaleString('en-GB')+'</span>':'<input type="number" min="0" step="50" value="'+r.amt+'" data-bk="oneoff" data-bi="'+i+'">')+'</div></div>';}).join('')+
+    '<div class="bsub"><span>Prelims subtotal</span><span class="v">'+F0(prelim)+'</span></div>'+
+
+    '<div class="bud-sec-t">Overheads &amp; profit</div>'+
+    (builder?'':'<div class="bpct"><label>O&amp;P <small>builder margin on build + prelims</small></label><div class="pi"><input type="number" min="0" step="0.5" value="'+BUD.oandpPct+'" id="budOandpPct"><span class="pp">%</span></div></div>')+
+    '<div class="bsub"><span>O&amp;P amount</span><span class="v">'+F0(oandp)+'</span></div>'+
+
+    '<div class="bmetrics">'+
+      '<div class="bm"><div class="bm-v">'+F0(build)+'</div><div class="bm-l">Build</div></div>'+
+      '<div class="bm"><div class="bm-v">'+F0(prelim)+'</div><div class="bm-l">Prelims</div></div>'+
+      '<div class="bm"><div class="bm-v">'+F0(oandp)+'</div><div class="bm-l">O&amp;P</div></div>'+
+      '<div class="bm hero"><div class="bm-v">'+F0(total)+'</div><div class="bm-l">Total quote</div></div>'+
+      (builder?'':'<div class="bm"><div class="bm-v">£'+perFt.toFixed(2)+'</div><div class="bm-l">£/ft² all-in</div></div>')+
+    '</div>'+
+
+    (builder?'':'<div class="bud-sec-t">Drawing checks <span style="text-transform:none;letter-spacing:0;color:#5a606e">— QS only, never shown builder-side</span></div>'+
+      chkRow('Masonry', mChk>0?('measured '+(mxiAWA(lastModel)||0).toFixed(0)+' m² block + '+((lastModel.wallType==='cavity')?(mxiEWN(lastModel)||0).toFixed(0):'0')+' m² brick'):'no masonry measured', mBud, mChk)+
+      chkRow('Windows &amp; doors', wd.glaze.toFixed(1)+' m² glazing · '+wd.doors+' doors · '+wd.bifoldM.toFixed(1)+' m bifold', wdBud, wd.total));
+
+  panel.querySelectorAll('input[data-bk]').forEach(function(inp){
+    inp.addEventListener('change',function(){
+      var k=this.getAttribute('data-bk'), i=+this.getAttribute('data-bi'), v=parseFloat(this.value)||0;
+      if(k==='materials') BUD.materials[i].rate=v;
+      else if(k==='trades') BUD.trades[i].rate=v;
+      else if(k==='oneoff') BUD.oneoffs[i].amt=v;
+      renderBudget();
+    });
+  });
+  var gi=document.getElementById('budGifa'); if(gi) gi.addEventListener('change',function(){ budgetGifaOverride=parseFloat(this.value)||0; renderBudget(); });
+  var pp=document.getElementById('budPrelimPct'); if(pp) pp.addEventListener('change',function(){ BUD.prelimPct=parseFloat(this.value)||0; renderBudget(); });
+  var op=document.getElementById('budOandpPct'); if(op) op.addEventListener('change',function(){ BUD.oandpPct=parseFloat(this.value)||0; renderBudget(); });
+}
+
+</script>
+</body>
+</html>
