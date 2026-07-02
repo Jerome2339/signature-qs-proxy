@@ -899,6 +899,24 @@ function buildModel(parsed, projName, clientName){
     studSpacing:400,joistSpacing:400,rafterSpacing:400,plaster:true,
     walls:[],openings:[],roof:{span:4.0,length:4.0,pitch:15,overhang:.45},floor:{L:4.0,W:4.0},extractedSpec:{}};
   if(parsed.floor){if(parsed.floor.length_m)m.floor.L=Math.round(parsed.floor.length_m*100)/100;if(parsed.floor.width_m)m.floor.W=Math.round(parsed.floor.width_m*100)/100;if(parsed.floor.ceiling_height_m)m.ceilingH=parsed.floor.ceiling_height_m;}
+  // FALLBACK: if DocAI didn't return a footprint length/width, use the floor-plan
+  // dimensions (captured separately by the extractor and flagged authoritative when they
+  // disagree with DocAI). Keyed off whether DocAI SUPPLIED the value — the model's
+  // floor.L/W default to 4.0, so we can't test them for 'missing'. Values are in mm.
+  var _fpd=(parsed.extra&&parsed.extra.floorplan_dimensions)||parsed.floorplan_dimensions;
+  if(_fpd){
+    var _fpL=_fpd.ground_floor_length_mm||_fpd.first_floor_length_mm;
+    var _fpW=_fpd.ground_floor_width_mm||_fpd.first_floor_width_mm;
+    var _docL=parsed.floor&&parsed.floor.length_m>0;
+    var _docW=parsed.floor&&parsed.floor.width_m>0;
+    // The extractor emits a floorplan_dimensions_check when DocAI disagrees with the
+    // floor plan (e.g. DocAI reads the ROOF SPAN as width). When it flags the floor
+    // plan as authoritative, prefer the floor-plan value even if DocAI supplied one.
+    var _chk=(parsed.extra&&parsed.extra.floorplan_dimensions_check)||parsed.floorplan_dimensions_check||[];
+    var _fpAuth=Array.isArray(_chk)&&_chk.some(function(t){return /authoritative/i.test(t||'');});
+    if((!_docL||_fpAuth)&&_fpL>0) m.floor.L=Math.round(_fpL/10)/100;
+    if((!_docW||_fpAuth)&&_fpW>0) m.floor.W=Math.round(_fpW/10)/100;
+  }
   if(parsed.walls&&parsed.walls.length>0){var extH=parsed.floor&&parsed.floor.ext_wall_height_m?parsed.floor.ext_wall_height_m:(m.ceilingH||2.4);m.walls=parsed.walls.filter(function(w){return w.length_m&&w.length_m>0;}).map(function(w){return{label:w.label||'Wall',L:Math.round(w.length_m*1000)/1000,H:w.height_m||extH,ext:w.is_external!==false,gable_area_m2:w.gable_area_m2||0};});}
   else if(parsed.floor&&parsed.floor.length_m&&parsed.floor.width_m){var L=parsed.floor.length_m,W2=parsed.floor.width_m,H=m.ceilingH||2.4;m.walls=[{label:'Front wall',L:L,H:H,ext:true},{label:'Rear wall',L:L,H:H,ext:true},{label:'Left wall',L:W2,H:H,ext:true},{label:'Right wall',L:W2,H:H,ext:true}];}
   var op=[];
