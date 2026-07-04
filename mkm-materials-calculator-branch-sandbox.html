@@ -1017,12 +1017,27 @@ function buildModel(parsed, projName, clientName){
     var nMeter=m.openings.filter(function(o){return o._meterBox;}).length;
     var nDup=m.openings.filter(function(o){return o._dupSuspect;}).length;
     var nHeight=m.openings.filter(function(o){return o._heightSuspect;}).length;
-    if(nMeter||nDup||nHeight||nGarageFire){
+    // (d) Whole-category-missing check: internal doors can vanish from extraction
+    // entirely (proven on Plot 24/Whorlton — 0 io-prefixed doors found, yet the room
+    // list included bedrooms/bathroom/utility/stores that obviously need one). No count
+    // field catches this (extra.door_count just agrees with whatever WAS found), so this
+    // compares the room list itself against the internal-door count. Never asserts a
+    // number — only flags the anomaly so it can't be mistaken for "this house has none".
+    var nInternalDoors=m.openings.filter(function(o){return wdType(o)!=='window'&&!wdIsExternal(o)&&!o._meterBox&&!o._dupSuspect&&!o._heightSuspect;}).reduce(function(a,o){return a+(o.qty||1);},0);
+    var enclosedRoomRE=/bedroom|bathroom|en[-\s]?suite|ensuite|cloak|\bw\.?c\.?\b|utility|\bstore\b|dressing|plant\s*room|\bstudy\b|snug|shower/i;
+    var rooms=(parsed.extra&&parsed.extra.rooms)||[];
+    var nEnclosedRooms=rooms.filter(function(r){return enclosedRoomRE.test((r&&r.type)||'');}).length;
+    var missingInternalDoors=(nEnclosedRooms>0 && nInternalDoors===0);
+    if(missingInternalDoors){
+      m._missingInternalDoorsNote='No internal doors were extracted, but the room list includes '+nEnclosedRooms+' room(s) (bedrooms/bathroom/utility/etc.) that would normally need one. This is a known extraction gap, not a real zero \u2014 check the drawing and add any missing internal doors below.';
+    }
+    if(nMeter||nDup||nHeight||nGarageFire||missingInternalDoors){
       m._openingNote='Openings review: '
         +(nMeter?nMeter+' meter box(es) excluded from door schedule. ':'')
         +(nDup?nDup+' external door(s) flagged as possible duplicate (identical size & room — e.g. a meter box read as a patio door). Confirm against the drawing. ':'')
         +(nHeight?nHeight+' external door(s) flagged as possible misread window (door height under 1.5m). Confirm against the drawing. ':'')
-        +(nGarageFire?nGarageFire+' internal door(s) off the garage auto-set to FD30 fire door (Building Regs Part B). Confirm against the drawing.':'');
+        +(nGarageFire?nGarageFire+' internal door(s) off the garage auto-set to FD30 fire door (Building Regs Part B). Confirm against the drawing. ':'')
+        +(missingInternalDoors?'\u26a0 No internal doors were extracted, but the room list includes '+nEnclosedRooms+' room(s) (bedrooms/bathroom/utility/etc.) that would normally need one. This is a known extraction gap, not a real zero \u2014 check the drawing and add any missing internal doors below.':'');
     }
   }
   if(parsed.roof){if(parsed.roof.type&&parsed.roof.type!=='unknown')m.roofType=(/flat|warm deck|epdm|single.ply|felt/i.test(parsed.roof.type))?'flat':'pitched';if(parsed.roof.span_m)m.roof.span=Math.round(parsed.roof.span_m*100)/100;if(parsed.roof.length_m)m.roof.length=Math.round(parsed.roof.length_m*100)/100;if(parsed.roof.pitch_degrees)m.roof.pitch=parsed.roof.pitch_degrees;if(parsed.roof.overhang_m)m.roof.overhang=parsed.roof.overhang_m;}
@@ -1087,6 +1102,7 @@ function renderScheduleBuilder(){
   }
   var countNote=mxScheduleCountNote(m, mxSchedRows);
   var countNoteHTML=countNote?'<div class="sched-copy" style="color:var(--g)">'+countNote+'</div>':'';
+  var missingDoorsHTML=m._missingInternalDoorsNote?'<div class="sched-disagree">\u26a0 '+m._missingInternalDoorsNote+'</div>':'';
   var rowsHTML=mxSchedRows.map(function(r,i){
     var statusPill=r.flags.length?'<span class="sched-pill sched-pill-flag">'+r.flags.join(' \u00b7 ')+'</span>'
       :r.complete?'<span class="sched-pill sched-pill-ok">Complete</span>'
@@ -1101,7 +1117,7 @@ function renderScheduleBuilder(){
   var html='<div class="sched-overlay" id="schedOverlay"><div class="sched-modal">'
     +'<h2>Opening Schedule</h2>'
     +'<div class="sched-copy">We built this opening schedule from your drawings. A few openings are on the plan but we couldn\u2019t read their sizes \u2014 add the dimensions below so your take-off is based only on confirmed data. Flagged rows look like a misread rather than a real opening \u2014 remove them if the drawing agrees.</div>'
-    +fund+disagreeHTML+countNoteHTML
+    +fund+disagreeHTML+missingDoorsHTML+countNoteHTML
     +'<table class="sched-table"><thead><tr><th>Ref</th><th>Type</th><th>Location</th><th>Width</th><th>Height</th><th>Status</th><th></th></tr></thead><tbody id="schedTbody">'+rowsHTML+'</tbody></table>'
     +'<div class="sched-add-row" id="schedAddRow">'
       +'<select id="schedAddType"><option value="door">Door</option><option value="window">Window</option><option value="bifold">Bifold</option></select>'
@@ -1138,9 +1154,17 @@ function wireScheduleBuilder(){
       renderScheduleBuilder();
     });
   });
-  var typeSel=document.getElementById('schedAddType'), kindSel=document.getElementById('schedAddDoorKind');
+  var typeSel=document.getElementById('schedAddType'), kindSel=document.getElementById('schedAddDoorKind'), locInp=document.getElementById('schedAddLoc');
   if(typeSel&&kindSel){ kindSel.style.display=(typeSel.value==='door')?'':'none';
     typeSel.addEventListener('change', function(){ kindSel.style.display=(this.value==='door')?'':'none'; }); }
+  if(locInp&&kindSel){
+    // Nudge, don't decide: typing "garage" pre-selects Fire (FD30) — the same rule
+    // buildModel applies automatically to extracted rows — but the user can still
+    // override it before clicking Add.
+    locInp.addEventListener('input', function(){
+      if(typeSel.value==='door' && /garage/i.test(this.value)) kindSel.value='fire';
+    });
+  }
   var addBtn=document.getElementById('schedAddBtn');
   if(addBtn){ addBtn.addEventListener('click', function(){
     var type=document.getElementById('schedAddType').value;
