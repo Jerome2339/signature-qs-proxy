@@ -118,6 +118,39 @@ select option{background:#171a20;color:#f0f1f3}
 .ext-hint{font-size:11px;color:var(--mu);margin-bottom:.6rem;line-height:1.5}
 .ext-walls{display:grid;gap:.4rem}
 .ext-wall{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:.6rem;font-size:13px}
+/* ── Opening Schedule Builder (interstitial) ─────────────────────────── */
+.sched-overlay{position:fixed;inset:0;background:rgba(10,11,14,.72);z-index:9000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:2.5rem 1rem}
+.sched-modal{background:var(--d2);border:1px solid var(--bd);border-radius:12px;max-width:900px;width:100%;padding:1.75rem;margin-bottom:2.5rem}
+.sched-modal h2{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;margin-bottom:.4rem}
+.sched-modal .sched-copy{font-size:13px;color:var(--mu);line-height:1.6;margin-bottom:1.25rem}
+.sched-fund-strip{display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:8px;padding:.75rem 1rem;margin-bottom:1.25rem;font-size:12px;color:var(--mu)}
+.sched-fund-strip b{color:var(--w);font-weight:600}
+.sched-disagree{background:rgba(255,204,0,.08);border:1px solid rgba(255,204,0,.35);border-radius:8px;padding:.75rem 1rem;margin-bottom:1.25rem;font-size:12px;color:var(--w)}
+.sched-disagree .sched-disagree-row{display:flex;align-items:center;gap:.5rem;margin-top:.5rem;flex-wrap:wrap}
+.sched-disagree input{width:80px;padding:4px 6px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:'DM Sans',sans-serif;font-size:12px}
+.sched-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:1rem}
+.sched-table th{text-align:left;color:var(--mu);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em;padding:.4rem .5rem;border-bottom:1px solid var(--bd)}
+.sched-table td{padding:.45rem .5rem;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
+.sched-row-incomplete{background:rgba(255,204,0,.07)}
+.sched-row-flagged{background:rgba(212,87,78,.07)}
+.sched-dim-input{width:64px;padding:4px 6px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:'DM Sans',sans-serif;font-size:12px}
+.sched-dim-input.sched-empty{border-color:var(--g)}
+.sched-pill{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;padding:2px 7px;border-radius:99px}
+.sched-pill-ok{background:rgba(90,154,76,.15);color:var(--gn)}
+.sched-pill-gap{background:rgba(255,204,0,.15);color:var(--g)}
+.sched-pill-flag{background:rgba(212,87,78,.15);color:var(--rd)}
+.sched-remove{background:none;border:none;color:var(--mu);cursor:pointer;font-size:14px;padding:2px 6px}
+.sched-remove:hover{color:var(--rd)}
+.sched-add-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;background:rgba(255,255,255,.03);border:1px dashed var(--bd);border-radius:8px;padding:.75rem;margin-bottom:1.25rem}
+.sched-add-row select,.sched-add-row input{padding:5px 7px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:'DM Sans',sans-serif;font-size:12px}
+.sched-add-row input[type="text"]{width:120px}
+.sched-add-row input[type="number"]{width:70px}
+.sched-footer{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+.sched-footer .sched-gap-count{font-size:12px;color:var(--mu)}
+.sched-btn{padding:.65rem 1.4rem;border-radius:8px;border:none;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer}
+.sched-btn-primary{background:var(--spinks);color:#fff}
+.sched-btn-primary:disabled{background:var(--bd);color:var(--mu);cursor:not-allowed}
+.sched-btn-cancel{background:none;border:1px solid var(--bd);color:var(--mu)}
 </style>
 </head>
 <body>
@@ -127,7 +160,7 @@ select option{background:#171a20;color:#f0f1f3}
   <div class="hdr-inner">
     <div class="hdr-brand">
       <div class="hdr-logo">M<span class="k">K</span>M</div>
-      <div class="hdr-tag">Materials Take-Off + Builder Quote &middot; build 7.19 · branch · sandbox</div>
+      <div class="hdr-tag">Materials Take-Off + Builder Quote &middot; build 7.20 · branch · sandbox</div>
     </div>
     <div class="counter">
       <div class="counter-n" id="counter">—</div>
@@ -391,24 +424,32 @@ async function analyse(){
 
     log('Extraction complete', 'done');
 
-    // Log the usage (fee event) to Supabase + email
     const proj = document.getElementById('projName').value || 'Unnamed project';
     const ht = document.getElementById('houseType').value || '';
     const fa = (data.extra && data.extra.floor_areas && data.extra.floor_areas.total_m2) ? data.extra.floor_areas.total_m2 : (data.floor && data.floor.area_m2 ? data.floor.area_m2 : '');
     const doors = (data.extra && data.extra.door_count != null) ? data.extra.door_count : (data.openings||[]).filter(o => /door|bifold|french/i.test(o.type||'') || /^D/i.test(o.label||'')).length;
     const windows = (data.extra && data.extra.window_count != null) ? data.extra.window_count : (data.openings||[]).filter(o => /window/i.test(o.type||'') || /^W/i.test(o.label||'')).length;
 
-    const logResp = await fetch(PROXY + '/log-usage', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ client: CLIENT, branch: branchNo.value.trim(), project: proj, houseType: ht,
-        results: { total_m2: fa, doors, windows }, ts: new Date().toISOString() })
-    });
-    const logData = await logResp.json();
-    if(logData.monthCount != null) document.getElementById('counter').textContent = logData.monthCount;
+    // Extension mode is out of scope for the schedule builder (parked per spec —
+    // self-builders bring single-plot drawings) — keep its original immediate-bill flow.
+    if(projectMode==='extension'){
+      const logResp = await fetch(PROXY + '/log-usage', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ client: CLIENT, branch: branchNo.value.trim(), project: proj, houseType: ht,
+          results: { total_m2: fa, doors, windows }, ts: new Date().toISOString() })
+      });
+      const logData = await logResp.json();
+      if(logData.monthCount != null) document.getElementById('counter').textContent = logData.monthCount;
+      log('Schedule generated \u2014 \u00a375 logged to MKM account', 'done');
+      showResults(data, fa, doors, windows);
+      return;
+    }
 
-    log('Schedule generated \u2014 \u00a375 logged to MKM account', 'done');
-
-    showResults(data, fa, doors, windows);
+    // House mode: build the opening schedule for review — billing fires on confirmed
+    // render (see confirmScheduleBuilder), not here, so an abandoned schedule is free.
+    log('Building opening schedule for review\u2026', 'done');
+    status.className = '';
+    openScheduleBuilder(data, proj, ht, fa);
 
   } catch(err) {
     log('Error: ' + err.message + ' \u2014 no fee charged. Please retry.', 'warn');
@@ -920,30 +961,68 @@ function buildModel(parsed, projName, clientName){
   if(parsed.walls&&parsed.walls.length>0){var extH=parsed.floor&&parsed.floor.ext_wall_height_m?parsed.floor.ext_wall_height_m:(m.ceilingH||2.4);m.walls=parsed.walls.filter(function(w){return w.length_m&&w.length_m>0;}).map(function(w){return{label:w.label||'Wall',L:Math.round(w.length_m*1000)/1000,H:w.height_m||extH,ext:w.is_external!==false,gable_area_m2:w.gable_area_m2||0};});}
   else if(parsed.floor&&parsed.floor.length_m&&parsed.floor.width_m){var L=parsed.floor.length_m,W2=parsed.floor.width_m,H=m.ceilingH||2.4;m.walls=[{label:'Front wall',L:L,H:H,ext:true},{label:'Rear wall',L:L,H:H,ext:true},{label:'Left wall',L:W2,H:H,ext:true},{label:'Right wall',L:W2,H:H,ext:true}];}
   var op=[];
-  if(parsed.openings&&parsed.openings.length>0){parsed.openings.filter(function(o){return (o.width_m&&o.width_m>0)||o.meter_box||o.type==='meter_box';}).forEach(function(o){op.push({label:o.label||'Opening',W:Math.round((o.width_m||0)*1000)/1000,H:o.height_m||2.1,qty:o.qty||1,type:o.type||'',external:(typeof o.external==='boolean'?o.external:undefined),fireDoor:!!o.fireDoor,location:o.location||'',meter_box:!!o.meter_box});});}
-  if(parsed.extra&&parsed.extra.doors){parsed.extra.doors.filter(function(d){return d.structural_w_mm;}).forEach(function(d){op.push({label:(d.ref||'Door')+' \u2014 '+(d.location||''),W:Math.round(d.structural_w_mm)/1000,H:d.structural_h_mm?Math.round(d.structural_h_mm)/1000:2.1,qty:1,type:(d.type==='bifold'||d.type==='bi-fold')?'bifold':'door'});});}
-  if(parsed.extra&&parsed.extra.windows){parsed.extra.windows.filter(function(w){return w.structural_w_mm;}).forEach(function(w){op.push({label:(w.ref||'Window')+' \u2014 '+(w.location||'')+(w.type==='bay'?' (Bay)':''),W:Math.round(w.structural_w_mm)/1000,H:w.structural_h_mm?Math.round(w.structural_h_mm)/1000:1.05,qty:1,type:'window'});});}
+  // Keep EVERY opening the extractor found, even ones missing width and/or height —
+  // an opening on the plan with no dimensions yet is exactly the gap the schedule
+  // builder exists to surface, not a row to silently drop. _hasW/_hasH record what was
+  // actually supplied; W/H are left undefined (not defaulted) when absent, so mxFN(...)
+  // downstream naturally yields 0 rather than computing off a fabricated dimension.
+  if(parsed.openings&&parsed.openings.length>0){parsed.openings.forEach(function(o){
+    var hasW=!!(o.width_m&&o.width_m>0), hasH=!!(o.height_m&&o.height_m>0);
+    op.push({label:o.label||'Opening',W:hasW?Math.round(o.width_m*1000)/1000:undefined,H:hasH?Math.round(o.height_m*1000)/1000:undefined,qty:o.qty||1,type:o.type||'',external:(typeof o.external==='boolean'?o.external:undefined),fireDoor:!!o.fireDoor,location:o.location||'',meter_box:!!o.meter_box,_hasW:hasW,_hasH:hasH});});}
+  if(parsed.extra&&parsed.extra.doors){parsed.extra.doors.forEach(function(d){
+    var hasW=!!d.structural_w_mm, hasH=!!d.structural_h_mm;
+    op.push({label:(d.ref||'Door')+' \u2014 '+(d.location||''),W:hasW?Math.round(d.structural_w_mm)/1000:undefined,H:hasH?Math.round(d.structural_h_mm)/1000:undefined,qty:1,type:(d.type==='bifold'||d.type==='bi-fold')?'bifold':'door',_hasW:hasW,_hasH:hasH});});}
+  if(parsed.extra&&parsed.extra.windows){parsed.extra.windows.forEach(function(w){
+    var hasW=!!w.structural_w_mm, hasH=!!w.structural_h_mm;
+    op.push({label:(w.ref||'Window')+' \u2014 '+(w.location||'')+(w.type==='bay'?' (Bay)':''),W:hasW?Math.round(w.structural_w_mm)/1000:undefined,H:hasH?Math.round(w.structural_h_mm)/1000:undefined,qty:1,type:'window',_hasW:hasW,_hasH:hasH});});}
   if(op.length>0)m.openings=op;
-  // ── Opening cleanup: meter boxes & duplicate misreads ──────────────────────
+  // ── Auto-tag integral-garage doors as FD30 fire doors (Building Regs Part B) ──
+  // The extractor never supplies o.fireDoor itself; infer it from the door's location
+  // text. Restricted to INTERNAL doors — the garage's own external door to the outside
+  // isn't a fire door, only the one separating the garage from habitable space.
+  var nGarageFire=0;
+  if(m.openings && m.openings.length){
+    m.openings.forEach(function(o){
+      if(!o.fireDoor && wdType(o)==='door' && !wdIsExternal(o)){
+        var loc=(o.location||wdDoorLocation(o)||'').toLowerCase();
+        if(/garage/.test(loc)){ o.fireDoor=true; nGarageFire++; }
+      }
+    });
+  }
+  // ── Opening cleanup: meter boxes, duplicate misreads & height anomalies ────
   // (a) Tag meter boxes (EO schedule includes the electricity meter box, which is NOT
   //     a door). (b) Catch the common parser misread where a meter box / spurious entry
   //     was given a real door's dimensions: an external door whose W×H exactly matches
   //     another external door in the same location is almost certainly a duplicate.
+  // (c) Catch a door row carrying a window-typical height (e.g. a window entity
+  //     mislabelled as an EO door) — real door heights in this dataset run ~1.9–2.2m;
+  //     anything under 1.5m on an EXTERNAL door/bifold is very likely a misread, not a
+  //     genuinely short external door. Restricted to external doors only — a short
+  //     INTERNAL door (e.g. a store cupboard) is plausible and shouldn't be flagged.
   if(m.openings && m.openings.length){
     m.openings.forEach(function(o){ if(wdIsMeterBox(o)) o._meterBox=true; });
-    var extDoors=m.openings.filter(function(o){var t=wdType(o);return (t==='door'||t==='bifold')&&!o._meterBox&&wdIsExternal(o);});
+    // Only rows with REAL W and H are eligible for dup/height-suspect checks — an
+    // incomplete row (W or H undefined, e.g. mxFN gives 0) would otherwise collide on a
+    // fake "0x0" key and get wrongly flagged as a duplicate of every other incomplete row.
+    var extDoors=m.openings.filter(function(o){var t=wdType(o);return (t==='door'||t==='bifold')&&!o._meterBox&&wdIsExternal(o)&&o._hasW&&o._hasH;});
     var seen={};
     extDoors.forEach(function(o){
       var key=Math.round(mxFN(o.W)*1000)+'x'+Math.round(mxFN(o.H)*1000)+'@'+(o.location||'').toLowerCase();
       if(seen[key]){ o._dupSuspect=true; }   // identical external door, same room → suspect duplicate
       else seen[key]=true;
     });
+    extDoors.forEach(function(o){
+      if(!o._dupSuspect && mxFN(o.H)>0 && mxFN(o.H)<1.5){ o._heightSuspect=true; }  // window-typical height on a door row
+    });
     var nMeter=m.openings.filter(function(o){return o._meterBox;}).length;
     var nDup=m.openings.filter(function(o){return o._dupSuspect;}).length;
-    if(nMeter||nDup){
+    var nHeight=m.openings.filter(function(o){return o._heightSuspect;}).length;
+    if(nMeter||nDup||nHeight||nGarageFire){
       m._openingNote='Openings review: '
         +(nMeter?nMeter+' meter box(es) excluded from door schedule. ':'')
-        +(nDup?nDup+' external door(s) flagged as possible duplicate (identical size & room — e.g. a meter box read as a patio door). Confirm against the drawing.':'');
+        +(nDup?nDup+' external door(s) flagged as possible duplicate (identical size & room — e.g. a meter box read as a patio door). Confirm against the drawing. ':'')
+        +(nHeight?nHeight+' external door(s) flagged as possible misread window (door height under 1.5m). Confirm against the drawing. ':'')
+        +(nGarageFire?nGarageFire+' internal door(s) off the garage auto-set to FD30 fire door (Building Regs Part B). Confirm against the drawing.':'');
     }
   }
   if(parsed.roof){if(parsed.roof.type&&parsed.roof.type!=='unknown')m.roofType=(/flat|warm deck|epdm|single.ply|felt/i.test(parsed.roof.type))?'flat':'pitched';if(parsed.roof.span_m)m.roof.span=Math.round(parsed.roof.span_m*100)/100;if(parsed.roof.length_m)m.roof.length=Math.round(parsed.roof.length_m*100)/100;if(parsed.roof.pitch_degrees)m.roof.pitch=parsed.roof.pitch_degrees;if(parsed.roof.overhang_m)m.roof.overhang=parsed.roof.overhang_m;}
@@ -952,6 +1031,168 @@ function buildModel(parsed, projName, clientName){
   if(parsed.floor_construction&&parsed.floor_construction!=='unknown')m.floorType=parsed.floor_construction;
   var rs=parsed.extra||{};m.extractedSpec={houseType:rs.house_type,client:rs.client,floorAreas:rs.floor_areas,ceilingHeights:rs.ceiling_heights,wallSpec:rs.wall_spec,rooms:rs.rooms||[],doorCount:rs.door_count||0,windowCount:rs.window_count||0,internal_stud_mm:rs.internal_stud_mm,internal_board_mm:rs.internal_board_mm};
   return m;
+}
+
+/* ── Opening Schedule Builder (interstitial) ──────────────────────────────
+   Replaces the old confirm-dialog approach. Assembles every opening the
+   extractor found into an editable table; rows missing width/height stay
+   editable and highlighted; the take-off only computes once every row the
+   user keeps has both dimensions. Never fabricates a size — an empty cell
+   IS the prompt. See docs/opening-schedule-builder-build-spec.md. ── */
+function mxAssembleOpeningSchedule(m){
+  return m.openings.filter(function(o){ return !o._meterBox; }).map(function(o){
+    var flags=[];
+    if(o._dupSuspect) flags.push('Possible duplicate');
+    if(o._heightSuspect) flags.push('Possible misread window (door height)');
+    return { o:o, ref:o.label||'Opening', type:wdType(o), location:wdDoorLocation(o)||'',
+      external:wdIsExternal(o), fireDoor:!!o.fireDoor, complete:!!(o._hasW&&o._hasH), flags:flags };
+  });
+}
+// Soft, non-blocking signal only — the extractor's own door/window tallies have been
+// shown (Middleham, Plot 24) to be self-consistent but WRONG in either direction, so
+// this is a nudge to double-check, never a gate on computing.
+function mxScheduleCountNote(m, rows){
+  var extra=m.extractedSpec||{};
+  var reportedDoors=extra.doorCount||0, reportedWindows=extra.windowCount||0;
+  var schedDoors=rows.filter(function(r){return r.type!=='window';}).length;
+  var schedWindows=rows.filter(function(r){return r.type==='window';}).length;
+  var bits=[];
+  if(reportedDoors && reportedDoors!==schedDoors) bits.push('extractor reported '+reportedDoors+' door(s), schedule shows '+schedDoors);
+  if(reportedWindows && reportedWindows!==schedWindows) bits.push('extractor reported '+reportedWindows+' window(s), schedule shows '+schedWindows);
+  return bits.length ? 'Note: '+bits.join('; ')+' — extraction counts aren\u2019t always reliable; check the drawing for anything not listed below.' : '';
+}
+var mxSchedRows=[];   // live rows for the interstitial (each wraps a reference into lastModel.openings)
+var mxSchedCtx=null;  // {data, proj, ht, fa} for the pending analysis being scheduled
+function openScheduleBuilder(data, proj, ht, fa){
+  lastModel = buildModel(data, proj, CLIENT);
+  mxSchedCtx = {data:data, proj:proj, ht:ht, fa:fa};
+  mxSchedRows = mxAssembleOpeningSchedule(lastModel);
+  renderScheduleBuilder();
+}
+function renderScheduleBuilder(){
+  var m=lastModel;
+  var existing=document.getElementById('schedOverlay'); if(existing) existing.remove();
+  var fund='<div class="sched-fund-strip">'
+    +'<span><b>'+mxiFA(m).toFixed(1)+' m\u00b2</b> GIFA</span>'
+    +'<span><b>'+m.floor.L+' \u00d7 '+m.floor.W+' m</b> footprint</span>'
+    +'<span><b>'+(m.wallType||'\u2014')+'</b> wall type</span>'
+    +'<span><b>'+(m.roofType||'\u2014')+'</b> roof</span>'
+    +'</div>';
+  var disagreeHTML='';
+  var chk=(mxSchedCtx.data.extra&&mxSchedCtx.data.extra.floorplan_dimensions_check)||mxSchedCtx.data.floorplan_dimensions_check||[];
+  if(Array.isArray(chk)&&chk.length){
+    disagreeHTML='<div class="sched-disagree">\u26a0 '+chk.join('; ')
+      +'<div class="sched-disagree-row">Confirm footprint \u2014 Length <input type="number" step="0.001" id="schedFloorL" value="'+m.floor.L+'"/> m'
+      +' \u00d7 Width <input type="number" step="0.001" id="schedFloorW" value="'+m.floor.W+'"/> m</div></div>';
+  }
+  var countNote=mxScheduleCountNote(m, mxSchedRows);
+  var countNoteHTML=countNote?'<div class="sched-copy" style="color:var(--g)">'+countNote+'</div>':'';
+  var rowsHTML=mxSchedRows.map(function(r,i){
+    var statusPill=r.flags.length?'<span class="sched-pill sched-pill-flag">'+r.flags.join(' \u00b7 ')+'</span>'
+      :r.complete?'<span class="sched-pill sched-pill-ok">Complete</span>'
+      :'<span class="sched-pill sched-pill-gap">Needs dimensions</span>';
+    var rowClass=r.flags.length?'sched-row-flagged':(!r.complete?'sched-row-incomplete':'');
+    var wCell=r.complete?(r.o.W+' m'):'<input type="number" step="0.001" min="0" class="sched-dim-input'+(r.o._hasW?'':' sched-empty')+'" data-idx="'+i+'" data-field="W" value="'+(r.o._hasW?r.o.W:'')+'" placeholder="width"/>';
+    var hCell=r.complete?(r.o.H+' m'):'<input type="number" step="0.001" min="0" class="sched-dim-input'+(r.o._hasH?'':' sched-empty')+'" data-idx="'+i+'" data-field="H" value="'+(r.o._hasH?r.o.H:'')+'" placeholder="height"/>';
+    return '<tr class="'+rowClass+'"><td>'+r.ref+'</td><td>'+r.type+(r.fireDoor?' (FD30)':'')+'</td><td>'+(r.location||'\u2014')+'</td>'
+      +'<td>'+wCell+'</td><td>'+hCell+'</td><td>'+statusPill+'</td>'
+      +'<td><button type="button" class="sched-remove" data-remove="'+i+'" title="Remove this opening">\u2715</button></td></tr>';
+  }).join('');
+  var html='<div class="sched-overlay" id="schedOverlay"><div class="sched-modal">'
+    +'<h2>Opening Schedule</h2>'
+    +'<div class="sched-copy">We built this opening schedule from your drawings. A few openings are on the plan but we couldn\u2019t read their sizes \u2014 add the dimensions below so your take-off is based only on confirmed data. Flagged rows look like a misread rather than a real opening \u2014 remove them if the drawing agrees.</div>'
+    +fund+disagreeHTML+countNoteHTML
+    +'<table class="sched-table"><thead><tr><th>Ref</th><th>Type</th><th>Location</th><th>Width</th><th>Height</th><th>Status</th><th></th></tr></thead><tbody id="schedTbody">'+rowsHTML+'</tbody></table>'
+    +'<div class="sched-add-row" id="schedAddRow">'
+      +'<select id="schedAddType"><option value="door">Door</option><option value="window">Window</option><option value="bifold">Bifold</option></select>'
+      +'<input type="text" id="schedAddLoc" placeholder="Location (e.g. Bedroom 2)"/>'
+      +'<input type="number" step="0.001" min="0" id="schedAddW" placeholder="Width (m)"/>'
+      +'<input type="number" step="0.001" min="0" id="schedAddH" placeholder="Height (m)"/>'
+      +'<select id="schedAddDoorKind"><option value="standard">Standard</option><option value="bathroom">Bathroom (privacy set)</option><option value="fire">Fire (FD30)</option></select>'
+      +'<button type="button" class="sched-btn sched-btn-cancel" id="schedAddBtn">+ Add opening</button></div>'
+    +'<div class="sched-footer"><span class="sched-gap-count" id="schedGapCount"></span>'
+      +'<div style="display:flex;gap:.6rem">'
+        +'<button type="button" class="sched-btn sched-btn-cancel" id="schedCancelBtn">Cancel</button>'
+        +'<button type="button" class="sched-btn sched-btn-primary" id="schedConfirmBtn">Confirm &amp; Generate Take-off</button></div></div>'
+    +'</div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+  wireScheduleBuilder();
+  updateScheduleGapState();
+}
+function wireScheduleBuilder(){
+  document.querySelectorAll('#schedTbody .sched-dim-input').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      var idx=parseInt(this.getAttribute('data-idx'),10), field=this.getAttribute('data-field');
+      var v=parseFloat(this.value), row=mxSchedRows[idx];
+      if(v>0){ row.o[field]=Math.round(v*1000)/1000; row.o['_has'+field]=true; }
+      else { row.o[field]=undefined; row.o['_has'+field]=false; }
+      row.complete=!!(row.o._hasW&&row.o._hasH);
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-remove').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var idx=parseInt(this.getAttribute('data-remove'),10), row=mxSchedRows[idx];
+      var pos=lastModel.openings.indexOf(row.o); if(pos>=0) lastModel.openings.splice(pos,1);
+      mxSchedRows=mxAssembleOpeningSchedule(lastModel);
+      renderScheduleBuilder();
+    });
+  });
+  var typeSel=document.getElementById('schedAddType'), kindSel=document.getElementById('schedAddDoorKind');
+  if(typeSel&&kindSel){ kindSel.style.display=(typeSel.value==='door')?'':'none';
+    typeSel.addEventListener('change', function(){ kindSel.style.display=(this.value==='door')?'':'none'; }); }
+  var addBtn=document.getElementById('schedAddBtn');
+  if(addBtn){ addBtn.addEventListener('click', function(){
+    var type=document.getElementById('schedAddType').value;
+    var loc=document.getElementById('schedAddLoc').value.trim();
+    var w=parseFloat(document.getElementById('schedAddW').value);
+    var h=parseFloat(document.getElementById('schedAddH').value);
+    if(!(w>0)||!(h>0)){ alert('Enter both a width and height before adding \u2014 an opening can\u2019t be counted without its dimensions.'); return; }
+    var kind=(type==='door')?document.getElementById('schedAddDoorKind').value:null;
+    var refN='ADD '+String(mxSchedRows.filter(function(r){return /^ADD/.test(r.ref);}).length+1).padStart(3,'0');
+    lastModel.openings.push({label:refN+(loc?(' \u2014 '+loc):''), W:Math.round(w*1000)/1000, H:Math.round(h*1000)/1000, qty:1,
+      type:type, external:false, fireDoor:(kind==='fire'), location:loc, meter_box:false, _hasW:true, _hasH:true, _addedManually:true, _doorKind:kind});
+    mxSchedRows=mxAssembleOpeningSchedule(lastModel);
+    renderScheduleBuilder();
+  }); }
+  var cancelBtn=document.getElementById('schedCancelBtn');
+  if(cancelBtn){ cancelBtn.addEventListener('click', function(){
+    var ov=document.getElementById('schedOverlay'); if(ov) ov.remove();
+    analyseBtn.disabled=false; feeCheck.disabled=false;
+  }); }
+  var confirmBtn=document.getElementById('schedConfirmBtn');
+  if(confirmBtn){ confirmBtn.addEventListener('click', confirmScheduleBuilder); }
+  var lIn=document.getElementById('schedFloorL'), wIn=document.getElementById('schedFloorW');
+  if(lIn) lIn.addEventListener('change', function(){ var v=parseFloat(this.value); if(v>0) lastModel.floor.L=Math.round(v*1000)/1000; });
+  if(wIn) wIn.addEventListener('change', function(){ var v=parseFloat(this.value); if(v>0) lastModel.floor.W=Math.round(v*1000)/1000; });
+}
+function updateScheduleGapState(){
+  var incomplete=mxSchedRows.filter(function(r){return !r.complete;}).length;
+  var flagged=mxSchedRows.filter(function(r){return r.flags.length;}).length;
+  var el=document.getElementById('schedGapCount');
+  if(el) el.textContent=incomplete?(incomplete+' opening(s) still need dimensions'):(flagged?flagged+' flagged row(s) \u2014 review before confirming, but not blocking':'All openings complete');
+  var btn=document.getElementById('schedConfirmBtn');
+  if(btn) btn.disabled=incomplete>0;
+}
+async function confirmScheduleBuilder(){
+  var ctx=mxSchedCtx, m=lastModel;
+  lastMats=mxiCalc(m);  // recompute from the CONFIRMED schedule
+  var confirmedDoors=m.openings.filter(function(o){return !o._meterBox&&wdType(o)!=='window';}).reduce(function(a,o){return a+(o.qty||1);},0);
+  var confirmedWindows=m.openings.filter(function(o){return wdType(o)==='window';}).reduce(function(a,o){return a+(o.qty||1);},0);
+  // Billing fires HERE \u2014 on confirmed render, not on Analyse \u2014 so an abandoned
+  // schedule (closed without confirming) is never charged.
+  try{
+    var logResp=await fetch(PROXY+'/log-usage', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({client:CLIENT, branch:branchNo.value.trim(), project:ctx.proj, houseType:ctx.ht,
+        results:{total_m2:ctx.fa, doors:confirmedDoors, windows:confirmedWindows}, ts:new Date().toISOString()})});
+    var logData=await logResp.json();
+    if(logData.monthCount!=null) document.getElementById('counter').textContent=logData.monthCount;
+  } catch(e){ /* non-fatal — still show the results already built */ }
+  var overlay=document.getElementById('schedOverlay'); if(overlay) overlay.remove();
+  window._lastData=ctx.data;
+  var results=document.getElementById('results'); results.className='card results show';
+  finalizeHouseResults(ctx.data, ctx.fa, confirmedDoors, confirmedWindows);
+  analyseBtn.disabled=false; feeCheck.disabled=false;
 }
 
 /* ── extension model: footprint + per-wall classification (user-confirmed) ── */
@@ -1069,11 +1310,20 @@ function showResults(data, fa, doors, windows){
     return;
   }
 
+  lastModel=buildModel(data, projName, CLIENT);
+  lastMats=mxiCalc(lastModel);
+  finalizeHouseResults(data, fa, doors, windows);
+}
+// Renders metrics tiles + schedule + pricing for the (already-built) house model.
+// Shared by the plain showResults() path and the schedule-builder confirm handler,
+// which builds/edits lastModel itself and calls this directly without re-running
+// buildModel (that would discard the user's schedule edits).
+function finalizeHouseResults(data, fa, doors, windows){
+  var BR=(typeof branchNo!=='undefined'&&branchNo)?branchNo.value.trim():'';
+  var projName=document.getElementById('projName').value||data.project_name||'Project';
   document.getElementById('resMetrics').innerHTML =
     tile((fa||'\u2014'),'Total m\u00b2')+tile(doors,'Doors')+tile(windows,'Windows')+
     tile((data.roof&&data.roof.pitch_degrees?data.roof.pitch_degrees+'\u00b0':'\u2014'),'Roof pitch');
-  lastModel=buildModel(data, projName, CLIENT);
-  lastMats=mxiCalc(lastModel);
   lastMeta={project:projName,branch:BR,houseType:(document.getElementById('houseType').value||'')};
   renderScheduleAndPanel(data);
   showPricingCard();
@@ -1219,7 +1469,7 @@ function wdType(o){
   return 'door';
 }
 function wdIsExternal(o){
-  if(o._meterBox||o._dupSuspect) return false;          // meter box / suspected duplicate — not a real external door
+  if(o._meterBox||o._dupSuspect||o._heightSuspect) return false;  // meter box / suspected duplicate / window misread as door — not a real external door
   if(wdIsMeterBox(o)) return false;                     // meter box is not an external door
   var ty=wdType(o);
   if(ty==='window'||ty==='bifold') return true;        // glazing & bifolds always belong here
