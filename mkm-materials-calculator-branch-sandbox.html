@@ -1025,9 +1025,14 @@ function buildModel(parsed, projName, clientName){
     // compares the room list itself against the internal-door count. Never asserts a
     // number — only flags the anomaly so it can't be mistaken for "this house has none".
     var nInternalDoors=m.openings.filter(function(o){return wdType(o)!=='window'&&!wdIsExternal(o)&&!o._meterBox&&!o._dupSuspect&&!o._heightSuspect;}).reduce(function(a,o){return a+(o.qty||1);},0);
-    var enclosedRoomRE=/bedroom|bathroom|en[-\s]?suite|ensuite|cloak|\bw\.?c\.?\b|utility|\bstore\b|dressing|plant\s*room|\bstudy\b|snug|shower/i;
+    var enclosedRoomRE=/bedroom|bathroom|en[-\s]?suite|ensuite|cloak|\bw\.?c\.?\b|utility|\bstore\b|dressing|plant\s*room|\bstudy\b|snug|shower|garage/i;
     var rooms=(parsed.extra&&parsed.extra.rooms)||[];
-    var nEnclosedRooms=rooms.filter(function(r){return enclosedRoomRE.test((r&&r.type)||'');}).length;
+    // Match against BOTH name and type — rooms like "Store"/"Cyl/Store" are typed
+    // generically as "other" with the descriptive info only in the name field, so
+    // matching type alone was silently missing them even though "store" was already
+    // in the keyword list. Garage added: an attached garage always needs its own
+    // internal fire door through to the house (Building Regs Part B).
+    var nEnclosedRooms=rooms.filter(function(r){return enclosedRoomRE.test(((r&&r.type)||'')+' '+((r&&r.name)||''));}).length;
     var missingInternalDoors=(nEnclosedRooms>0 && nInternalDoors===0);
     if(missingInternalDoors){
       m._missingInternalDoorsNote='No internal doors were extracted, but the room list includes '+nEnclosedRooms+' room(s) (bedrooms/bathroom/utility/etc.) that would normally need one. This is a known extraction gap, not a real zero. A starting count has been added below \u2014 it\u2019s a rough floor based on the room list, not a real count, so check it against the drawing and adjust.';
