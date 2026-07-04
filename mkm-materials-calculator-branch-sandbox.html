@@ -140,6 +140,8 @@ select option{background:#171a20;color:#f0f1f3}
 .sched-pill-gap{background:rgba(255,204,0,.15);color:var(--g)}
 .sched-pill-flag{background:rgba(212,87,78,.15);color:var(--rd)}
 .sched-remove{background:none;border:none;color:var(--mu);cursor:pointer;font-size:14px;padding:2px 6px}
+.sched-confirm-real{background:none;border:none;color:var(--gn);cursor:pointer;font-size:13px;padding:2px 4px;margin-left:2px}
+.sched-confirm-real:hover{color:#7cc46a}
 .sched-remove:hover{color:var(--rd)}
 .sched-add-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;background:rgba(255,255,255,.03);border:1px dashed var(--bd);border-radius:8px;padding:.75rem;margin-bottom:1.25rem}
 .sched-add-row select,.sched-add-row input{padding:5px 7px;border:1px solid var(--bd);border-radius:4px;background:rgba(255,255,255,.06);color:var(--w);font-family:'DM Sans',sans-serif;font-size:12px}
@@ -823,7 +825,7 @@ function mxiCalc(m){
   // ── SECOND FIX JOINERY ──────────────────────────────────────────────────
   // Internal doors only — external doors (D01 front, bi-folds, garage, head>=2100) are
   // priced in the external Windows & Doors package, NOT second-fix joinery.
-  var internalDoors=m.openings.filter(function(o){ return wdType(o)!=='window' && !wdIsExternal(o) && !o._meterBox && !o._dupSuspect && !o._heightSuspect; });
+  var internalDoors=m.openings.filter(function(o){ return wdType(o)!=='window' && !wdIsExternal(o) && !o._meterBox; });
   var internalCount=internalDoors.reduce(function(a,o){return a+(o.qty||1);},0);
   var totalDoorWidth=internalDoors.reduce(function(t,o){return t+mxFN(o.W)*(o.qty||1);},0);
   // SKIRTING — ext wall internal face x storeys + internal partitions (both faces, factored)
@@ -844,29 +846,71 @@ function mxiCalc(m){
   if(archRun>0) mats.push({cat:'Second Fix Joinery',item:'Architrave 15x69mm MDF ogee',qty:mxF2(archRun*MXW),unit:'lin m',note:'Both sides all internal door openings +10%',basis:internalCount+' doors x2 sides'});
 
   if(internalCount>0){
-    // One lining per internal door (externals have their own frames in the external package)
-    mats.push({cat:'Second Fix Joinery',item:'Internal door lining set sw',qty:Math.ceil(internalCount),unit:'nr',note:'32x115mm head + 2 legs per door',basis:internalCount+' internal doors'});
+    // Leaf/lining qty contribution: a double door needs 2 leaves. Hardware (hinges,
+    // handles, latches, locks) is left as-is per opening for now — genuine double-door
+    // furniture (e.g. flush bolts on the inactive leaf) varies by spec and isn't
+    // fabricated here; only the leaf/lining count (the actual ordering-critical bit
+    // Jerome flagged) is doubled.
+    function mxLeafQty(o){ return (o.qty||1)*(o._double?2:1); }
+    function mxWidthQty(objs){ var w={'838':0,'762':0}; objs.forEach(function(o){ var k=(o._leafWidth==='762')?'762':'838'; w[k]+=mxLeafQty(o); }); return w; }
+
+    // Lining set — every internal door needs one regardless of kind, and each door's
+    // own _leafWidth is real data (defaulted 838mm ground/762mm first, user-editable
+    // in the schedule), so this split is exact, not an estimate.
+    var liningW=mxWidthQty(internalDoors);
+    if(liningW['838']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door lining set sw \u2014 838mm',qty:Math.ceil(liningW['838']),unit:'nr',note:'32x115mm head + 2 legs per door leaf',basis:liningW['838']+' door leaves (838mm)'});
+    if(liningW['762']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door lining set sw \u2014 762mm',qty:Math.ceil(liningW['762']),unit:'nr',note:'32x115mm head + 2 legs per door leaf',basis:liningW['762']+' door leaves (762mm)'});
 
     // Fire doors (FD30) — flagged in the schedule notes (e.g. integral-garage door)
     var fireDoors=internalDoors.filter(function(o){return o.fireDoor;}).reduce(function(a,o){return a+(o.qty||1);},0);
 
     // Bathroom/WC/en-suite doors — by the door's own location when available, else wet-room count
+    var bathroomObjs=internalDoors.filter(function(o){ if(o.fireDoor) return false; var l=(o.location||wdDoorLocation(o)); return /bath|en[-\s]?suite|ensuite|\bw[\.\/]?c\b|cloak|shower|wet/.test(l); });
+    var bLoc=bathroomObjs.reduce(function(a,o){return a+(o.qty||1);},0);
     var bathroomDoors, bathBasis;
-    var bLoc=internalDoors.filter(function(o){ if(o.fireDoor) return false; var l=(o.location||wdDoorLocation(o)); return /bath|en[-\s]?suite|ensuite|\bw[\.\/]?c\b|cloak|shower|wet/.test(l); }).reduce(function(a,o){return a+(o.qty||1);},0);
     if(bLoc>0){ bathroomDoors=Math.min(bLoc,internalCount-fireDoors); bathBasis=bathroomDoors+' wet-room doors (from schedule)'; }
     else { var wetRooms=mxiWetRoomCount(m); if(wetRooms!==null){ bathroomDoors=Math.min(wetRooms,internalCount-fireDoors); bathBasis=bathroomDoors+' wet rooms (from plans)'; } else { bathroomDoors=Math.max(1,Math.round((internalCount-fireDoors)*0.2)); bathBasis=bathroomDoors+' bathroom doors (est.)'; } }
 
     var standardDoors=internalCount-fireDoors-bathroomDoors;
     if(standardDoors<0) standardDoors=0;
 
+    // Width split for the STANDARD leaf: when bLoc>0, bathroomObjs are real identified
+    // openings, so subtracting them leaves a real, exact standard-door object set to
+    // split by width. When bathroomDoors is only an estimate (no location text backs
+    // it), there's no real "which door is bathroom" to exclude — so instead the
+    // standard-leaf width split is taken proportionally from the OBSERVED width mix
+    // across all non-fire doors, scaled down to the standardDoors total. This is a
+    // deliberate approximation in that branch, never a double-count against the
+    // separately-listed (unsplit) bathroom leaf line below.
+    var nonFireObjs=internalDoors.filter(function(o){return !o.fireDoor;});
+    var stdW;
+    if(bLoc>0){
+      var standardObjs=nonFireObjs.filter(function(o){ return bathroomObjs.indexOf(o)===-1; });
+      stdW=mxWidthQty(standardObjs);
+    } else {
+      var allW=mxWidthQty(nonFireObjs), totalW=allW['838']+allW['762'];
+      var ratio838=totalW>0?allW['838']/totalW:1;
+      var std838=Math.round(standardDoors*ratio838);
+      stdW={'838':std838,'762':standardDoors-std838};
+    }
+
     if(standardDoors>0){
-      mats.push({cat:'Second Fix Joinery',item:'Internal door 35mm solid core flush',qty:Math.ceil(standardDoors),unit:'nr',note:'Pre-primed, to be painted',basis:standardDoors+' doors'});
+      if(stdW['838']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 35mm solid core flush \u2014 838mm',qty:Math.ceil(stdW['838']),unit:'nr',note:'Pre-primed, to be painted',basis:stdW['838']+' doors (838mm)'});
+      if(stdW['762']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 35mm solid core flush \u2014 762mm',qty:Math.ceil(stdW['762']),unit:'nr',note:'Pre-primed, to be painted',basis:stdW['762']+' doors (762mm)'});
       mats.push({cat:'Second Fix Joinery',item:'Lever handle on rose satin chrome',qty:Math.ceil(standardDoors),unit:'sets',note:'Pair per door',basis:standardDoors+' doors'});
       mats.push({cat:'Second Fix Joinery',item:'Tubular latch 63mm',qty:Math.ceil(standardDoors),unit:'nr',note:'1 per door',basis:standardDoors+' doors'});
       mats.push({cat:'Second Fix Joinery',item:'Door stops floor/wall mounted',qty:Math.ceil(standardDoors),unit:'nr',note:'1 per door',basis:standardDoors+' doors'});
     }
     if(bathroomDoors>0){
-      mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom)',qty:Math.ceil(bathroomDoors),unit:'nr',note:'Solid core for privacy',basis:bathBasis});
+      // Only split the bathroom leaf by width when it's backed by real objects (bLoc>0)
+      // — an estimated count has no specific doors to attribute a width to.
+      if(bLoc>0){
+        var bathW=mxWidthQty(bathroomObjs);
+        if(bathW['838']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom) \u2014 838mm',qty:Math.ceil(bathW['838']),unit:'nr',note:'Solid core for privacy',basis:bathW['838']+' doors (838mm)'});
+        if(bathW['762']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom) \u2014 762mm',qty:Math.ceil(bathW['762']),unit:'nr',note:'Solid core for privacy',basis:bathW['762']+' doors (762mm)'});
+      } else {
+        mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom)',qty:Math.ceil(bathroomDoors),unit:'nr',note:'Solid core for privacy \u2014 width not split, count is estimated',basis:bathBasis});
+      }
       mats.push({cat:'Second Fix Joinery',item:'Bathroom lock set thumb turn & release',qty:Math.ceil(bathroomDoors),unit:'sets',note:'Privacy lock with emergency release',basis:bathBasis});
       mats.push({cat:'Second Fix Joinery',item:'Bathroom lever handle with indicator bolt',qty:Math.ceil(bathroomDoors),unit:'sets',note:'Engaged/vacant indicator',basis:bathBasis});
       mats.push({cat:'Second Fix Joinery',item:'Door stops floor/wall mounted',qty:Math.ceil(bathroomDoors),unit:'nr',note:'1 per door',basis:bathBasis});
@@ -1024,7 +1068,7 @@ function buildModel(parsed, projName, clientName){
     // field catches this (extra.door_count just agrees with whatever WAS found), so this
     // compares the room list itself against the internal-door count. Never asserts a
     // number — only flags the anomaly so it can't be mistaken for "this house has none".
-    var nInternalDoors=m.openings.filter(function(o){return wdType(o)!=='window'&&!wdIsExternal(o)&&!o._meterBox&&!o._dupSuspect&&!o._heightSuspect;}).reduce(function(a,o){return a+(o.qty||1);},0);
+    var nInternalDoors=m.openings.filter(function(o){return wdType(o)!=='window'&&!wdIsExternal(o)&&!o._meterBox;}).reduce(function(a,o){return a+(o.qty||1);},0);
     var enclosedRoomRE=/bedroom|bathroom|en[-\s]?suite|ensuite|cloak|\bw\.?c\.?\b|utility|\bstore\b|dressing|plant\s*room|\bstudy\b|snug|shower|garage/i;
     var rooms=(parsed.extra&&parsed.extra.rooms)||[];
     // Match against BOTH name and type — rooms like "Store"/"Cyl/Store" are typed
@@ -1067,6 +1111,17 @@ function buildModel(parsed, projName, clientName){
    editable and highlighted; the take-off only computes once every row the
    user keeps has both dimensions. Never fabricates a size — an empty cell
    IS the prompt. See docs/opening-schedule-builder-build-spec.md. ── */
+// Best-effort match of a door's location text against the room list to find which
+// floor it's on, purely to pick a sensible DEFAULT leaf width (838mm ground / 762mm
+// first — the common UK convention Jerome confirmed). Returns null (no default beyond
+// the 838mm fallback) if there's nothing to match against — never guesses harder than
+// the data supports.
+function mxInferDoorFloor(o, rooms){
+  var loc=(wdDoorLocation(o)||'').toLowerCase().trim();
+  if(!loc || !rooms || !rooms.length) return null;
+  var hit=rooms.filter(function(r){ var rn=((r&&r.name)||'').toLowerCase().trim(); return rn && (loc.indexOf(rn)>=0 || rn.indexOf(loc)>=0); })[0];
+  return hit ? (hit.floor||null) : null;
+}
 function mxAssembleOpeningSchedule(m){
   return m.openings.filter(function(o){ return !o._meterBox; }).map(function(o){
     var flags=[];
@@ -1083,6 +1138,15 @@ function mxAssembleOpeningSchedule(m){
     // W×H regardless — that's the evidence needed to judge the flag; suspect status
     // makes wdIsExternal() report false, but that's not the same as "doesn't need dims".
     var needsDims = suspect ? true : (ext || ty==='window');
+    // Internal doors (not needing dims) get a floor-aware leaf-width default the first
+    // time they're assembled — 838mm ground / 762mm first, the common UK convention —
+    // set here (data assembly) rather than in the renderer, so it's reliably in place
+    // even if mxiCalc runs before the schedule UI does.
+    if(!needsDims && o._leafWidth===undefined){
+      var floorGuess=mxInferDoorFloor(o, (m.extractedSpec&&m.extractedSpec.rooms)||[]);
+      o._leafWidth=(floorGuess==='first')?'762':'838';
+      o._double=false;
+    }
     return { o:o, ref:o.label||'Opening', type:ty, location:o._suggested?'':(wdDoorLocation(o)||''),
       external:ext, fireDoor:!!o.fireDoor, needsDims:needsDims, suspect:suspect, suggested:!!o._suggested,
       complete: needsDims ? !!(o._hasW&&o._hasH) : true, flags:flags };
@@ -1135,6 +1199,8 @@ function renderScheduleBuilder(){
       :r.complete?'<span class="sched-pill sched-pill-ok">Complete</span>'
       :'<span class="sched-pill sched-pill-gap">Needs dimensions</span>';
     var rowClass=r.suspect?'sched-row-flagged':((!r.complete||r.suggested)?'sched-row-incomplete':'');
+    var refCell='<input type="text" class="sched-inline-input sched-ref-input" data-idx="'+i+'" value="'+(r.ref||'').replace(/"/g,'&quot;')+'"/>';
+    var confirmBtn=r.suspect?'<button type="button" class="sched-confirm-real" data-confirmreal="'+i+'" title="Confirm this is a real opening">\u2713</button>':'';
     var typeOpts=['door','window','bifold'].map(function(t){return '<option value="'+t+'"'+(r.type===t?' selected':'')+'>'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>';}).join('');
     var typeCell='<select class="sched-inline-select sched-type-select" data-idx="'+i+'">'+typeOpts+'</select>';
     var locCell='<input type="text" class="sched-inline-input sched-loc-input" data-idx="'+i+'" value="'+(r.location||'').replace(/"/g,'&quot;')+'" placeholder="location"/>';
@@ -1144,15 +1210,21 @@ function renderScheduleBuilder(){
       hCell='<input type="number" step="0.001" min="0" class="sched-dim-input'+(r.o._hasH?'':' sched-empty')+'" data-idx="'+i+'" data-field="H" value="'+(r.o._hasH?r.o.H:'')+'" placeholder="height"/>';
     } else {
       // Internal doors carry no structural dimensions in the take-off — qty + kind
-      // (standard/bathroom/fire) is all mxiCalc ever uses for them.
+      // (standard/bathroom/fire) + leaf width + single/double is all mxiCalc uses.
       var kindVal=r.o.fireDoor?'fire':(r.o._doorKind==='bathroom'?'bathroom':'standard');
       wCell='<input type="number" step="1" min="1" class="sched-dim-input" data-idx="'+i+'" data-field="qty" value="'+(r.o.qty||1)+'" placeholder="qty"/>';
-      hCell='<select class="sched-inline-select sched-kind-select" data-idx="'+i+'">'
-        +'<option value="standard"'+(kindVal==='standard'?' selected':'')+'>Standard</option>'
-        +'<option value="bathroom"'+(kindVal==='bathroom'?' selected':'')+'>Bathroom</option>'
-        +'<option value="fire"'+(kindVal==='fire'?' selected':'')+'>Fire (FD30)</option></select>';
+      hCell='<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
+        +'<select class="sched-inline-select sched-kind-select" data-idx="'+i+'" style="width:auto">'
+          +'<option value="standard"'+(kindVal==='standard'?' selected':'')+'>Standard</option>'
+          +'<option value="bathroom"'+(kindVal==='bathroom'?' selected':'')+'>Bathroom</option>'
+          +'<option value="fire"'+(kindVal==='fire'?' selected':'')+'>Fire (FD30)</option></select>'
+        +'<select class="sched-inline-select sched-leaf-select" data-idx="'+i+'" style="width:auto">'
+          +'<option value="838"'+(r.o._leafWidth==='838'?' selected':'')+'>838mm</option>'
+          +'<option value="762"'+(r.o._leafWidth==='762'?' selected':'')+'>762mm</option></select>'
+        +'<label style="font-size:11px;color:var(--mu);display:flex;align-items:center;gap:3px;white-space:nowrap"><input type="checkbox" class="sched-double-check" data-idx="'+i+'"'+(r.o._double?' checked':'')+'/> 2x</label>'
+        +'</div>';
     }
-    return '<tr class="'+rowClass+'"><td>'+r.ref+'</td><td>'+typeCell+'</td><td>'+locCell+'</td>'
+    return '<tr class="'+rowClass+'"><td>'+refCell+confirmBtn+'</td><td>'+typeCell+'</td><td>'+locCell+'</td>'
       +'<td>'+wCell+'</td><td>'+hCell+'</td><td>'+statusPill+'</td>'
       +'<td><button type="button" class="sched-remove" data-remove="'+i+'" title="Remove this opening">\u2715</button></td></tr>';
   }).join('');
@@ -1190,6 +1262,35 @@ function wireScheduleBuilder(){
         else { row.o[field]=undefined; row.o['_has'+field]=false; }
         row.o._dupSuspect=false; row.o._heightSuspect=false;  // manual edit supersedes the automated guess
       }
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-ref-input').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx];
+      row.o.label=this.value.trim();
+      row.o._dupSuspect=false; row.o._heightSuspect=false;  // correcting the ref (e.g. a mislabelled number) is itself the confirmation
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-confirm-real').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var idx=parseInt(this.getAttribute('data-confirmreal'),10), row=mxSchedRows[idx];
+      row.o._dupSuspect=false; row.o._heightSuspect=false;  // explicit "this is real, nothing else needs changing"
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-leaf-select').forEach(function(sel){
+    sel.addEventListener('change', function(){
+      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx];
+      row.o._leafWidth=this.value;
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-double-check').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx];
+      row.o._double=this.checked;
       renderScheduleBuilder();
     });
   });
@@ -1583,8 +1684,7 @@ function wdType(o){
   return 'door';
 }
 function wdIsExternal(o){
-  if(o._meterBox||o._dupSuspect||o._heightSuspect) return false;  // meter box / suspected duplicate / window misread as door — not a real external door
-  if(wdIsMeterBox(o)) return false;                     // meter box is not an external door
+  if(wdIsMeterBox(o)) return false;                     // meter box is not an external door — structural fact, not a suspicion
   var ty=wdType(o);
   if(ty==='window'||ty==='bifold') return true;        // glazing & bifolds always belong here
   if(typeof o.external==='boolean') return o.external;  // vector-supplied flag wins (height>=2100, notes, garage)
@@ -1606,7 +1706,7 @@ function internalDoorCount(){
   return lastModel.openings.filter(function(o){
     var ty=wdType(o);
     if(ty==='window'||ty==='bifold') return false;
-    return !wdIsExternal(o) && !o._meterBox && !o._dupSuspect && !o._heightSuspect;
+    return !wdIsExternal(o) && !o._meterBox;
   }).reduce(function(a,o){return a+(o.qty||1);},0);
 }
 function wdRef(o,i){
