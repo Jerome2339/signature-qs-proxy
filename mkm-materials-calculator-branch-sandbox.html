@@ -1029,7 +1029,14 @@ function buildModel(parsed, projName, clientName){
     var nEnclosedRooms=rooms.filter(function(r){return enclosedRoomRE.test((r&&r.type)||'');}).length;
     var missingInternalDoors=(nEnclosedRooms>0 && nInternalDoors===0);
     if(missingInternalDoors){
-      m._missingInternalDoorsNote='No internal doors were extracted, but the room list includes '+nEnclosedRooms+' room(s) (bedrooms/bathroom/utility/etc.) that would normally need one. This is a known extraction gap, not a real zero \u2014 check the drawing and add any missing internal doors below.';
+      m._missingInternalDoorsNote='No internal doors were extracted, but the room list includes '+nEnclosedRooms+' room(s) (bedrooms/bathroom/utility/etc.) that would normally need one. This is a known extraction gap, not a real zero. A starting count has been added below \u2014 it\u2019s a rough floor based on the room list, not a real count, so check it against the drawing and adjust.';
+      // Pre-populate an editable, clearly-marked SUGGESTED row rather than leaving an
+      // empty form to operate — nEnclosedRooms only counts specific room-type matches
+      // (bedroom/bathroom/utility/wc/etc.), so it's a floor, not a real count (e.g. it
+      // won't catch a garage/hall door, or a store room typed generically as "other").
+      m.openings.push({label:'Internal doors \u2014 Standard', W:undefined, H:undefined,
+        qty:nEnclosedRooms, type:'door', external:false, fireDoor:false, location:'', meter_box:false,
+        _hasW:false, _hasH:false, _suggested:true, _doorKind:'standard'});
     }
     if(nMeter||nDup||nHeight||nGarageFire||missingInternalDoors){
       m._openingNote='Openings review: '
@@ -1057,16 +1064,21 @@ function buildModel(parsed, projName, clientName){
 function mxAssembleOpeningSchedule(m){
   return m.openings.filter(function(o){ return !o._meterBox; }).map(function(o){
     var flags=[];
+    var suspect=!!(o._dupSuspect||o._heightSuspect);
     if(o._dupSuspect) flags.push('Possible duplicate');
     if(o._heightSuspect) flags.push('Possible misread window (door height)');
+    if(o._suggested) flags.push('Suggested count \u2014 confirm against the drawing');
     var ext=wdIsExternal(o), ty=wdType(o);
     // Dimensions only matter for EXTERNAL doors/bifolds and windows — they drive
     // lintels, cills, heads and brick deductions. Internal doors are standard-sized:
     // the take-off only ever uses their count + kind (standard/bathroom/fire), never
     // W×H, so an internal door with no recorded size is not an incomplete row.
-    var needsDims = ext || ty==='window';
-    return { o:o, ref:o.label||'Opening', type:ty, location:wdDoorLocation(o)||'',
-      external:ext, fireDoor:!!o.fireDoor, needsDims:needsDims,
+    // A row FLAGGED as a suspected duplicate/misread must still show its real recorded
+    // W×H regardless — that's the evidence needed to judge the flag; suspect status
+    // makes wdIsExternal() report false, but that's not the same as "doesn't need dims".
+    var needsDims = suspect ? true : (ext || ty==='window');
+    return { o:o, ref:o.label||'Opening', type:ty, location:o._suggested?'':(wdDoorLocation(o)||''),
+      external:ext, fireDoor:!!o.fireDoor, needsDims:needsDims, suspect:suspect, suggested:!!o._suggested,
       complete: needsDims ? !!(o._hasW&&o._hasH) : true, flags:flags };
   });
 }
@@ -1110,12 +1122,13 @@ function renderScheduleBuilder(){
   }
   var countNote=mxScheduleCountNote(m, mxSchedRows);
   var countNoteHTML=countNote?'<div class="sched-copy" style="color:var(--g)">'+countNote+'</div>':'';
-  var missingDoorsHTML=m._missingInternalDoorsNote?'<div class="sched-disagree">\u26a0 '+m._missingInternalDoorsNote+' Use \u201cInternal Door\u201d below to add them in bulk by count \u2014 you don\u2019t need to enter each one\u2019s size or location.</div>':'';
+  var missingDoorsHTML=m._missingInternalDoorsNote?'<div class="sched-disagree">\u26a0 '+m._missingInternalDoorsNote+'</div>':'';
   var rowsHTML=mxSchedRows.map(function(r,i){
-    var statusPill=r.flags.length?'<span class="sched-pill sched-pill-flag">'+r.flags.join(' \u00b7 ')+'</span>'
+    var statusPill=r.suspect?'<span class="sched-pill sched-pill-flag">'+r.flags.join(' \u00b7 ')+'</span>'
+      :r.suggested?'<span class="sched-pill sched-pill-gap">'+r.flags.join(' \u00b7 ')+'</span>'
       :r.complete?'<span class="sched-pill sched-pill-ok">Complete</span>'
       :'<span class="sched-pill sched-pill-gap">Needs dimensions</span>';
-    var rowClass=r.flags.length?'sched-row-flagged':(!r.complete?'sched-row-incomplete':'');
+    var rowClass=r.suspect?'sched-row-flagged':((!r.complete||r.suggested)?'sched-row-incomplete':'');
     var typeOpts=['door','window','bifold'].map(function(t){return '<option value="'+t+'"'+(r.type===t?' selected':'')+'>'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>';}).join('');
     var typeCell='<select class="sched-inline-select sched-type-select" data-idx="'+i+'">'+typeOpts+'</select>';
     var locCell='<input type="text" class="sched-inline-input sched-loc-input" data-idx="'+i+'" value="'+(r.location||'').replace(/"/g,'&quot;')+'" placeholder="location"/>';
@@ -1258,9 +1271,14 @@ function wireScheduleBuilder(){
 }
 function updateScheduleGapState(){
   var incomplete=mxSchedRows.filter(function(r){return !r.complete;}).length;
-  var flagged=mxSchedRows.filter(function(r){return r.flags.length;}).length;
+  var suspect=mxSchedRows.filter(function(r){return r.suspect;}).length;
+  var suggested=mxSchedRows.filter(function(r){return r.suggested;}).length;
   var el=document.getElementById('schedGapCount');
-  if(el) el.textContent=incomplete?(incomplete+' opening(s) still need dimensions'):(flagged?flagged+' flagged row(s) \u2014 review before confirming, but not blocking':'All openings complete');
+  var bits=[];
+  if(incomplete) bits.push(incomplete+' opening(s) still need dimensions');
+  if(suspect) bits.push(suspect+' flagged row(s) to review');
+  if(suggested) bits.push(suggested+' suggested count(s) to confirm');
+  if(el) el.textContent=bits.length?bits.join(' \u00b7 ')+(incomplete?'':' \u2014 not blocking'):'All openings complete';
   var btn=document.getElementById('schedConfirmBtn');
   if(btn) btn.disabled=incomplete>0;
 }
