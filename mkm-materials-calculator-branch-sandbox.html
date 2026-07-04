@@ -822,7 +822,7 @@ function mxiCalc(m){
   // ── SECOND FIX JOINERY ──────────────────────────────────────────────────
   // Internal doors only — external doors (D01 front, bi-folds, garage, head>=2100) are
   // priced in the external Windows & Doors package, NOT second-fix joinery.
-  var internalDoors=m.openings.filter(function(o){ return wdType(o)!=='window' && !wdIsExternal(o); });
+  var internalDoors=m.openings.filter(function(o){ return wdType(o)!=='window' && !wdIsExternal(o) && !o._meterBox && !o._dupSuspect && !o._heightSuspect; });
   var internalCount=internalDoors.reduce(function(a,o){return a+(o.qty||1);},0);
   var totalDoorWidth=internalDoors.reduce(function(t,o){return t+mxFN(o.W)*(o.qty||1);},0);
   // SKIRTING — ext wall internal face x storeys + internal partitions (both faces, factored)
@@ -1059,8 +1059,15 @@ function mxAssembleOpeningSchedule(m){
     var flags=[];
     if(o._dupSuspect) flags.push('Possible duplicate');
     if(o._heightSuspect) flags.push('Possible misread window (door height)');
-    return { o:o, ref:o.label||'Opening', type:wdType(o), location:wdDoorLocation(o)||'',
-      external:wdIsExternal(o), fireDoor:!!o.fireDoor, complete:!!(o._hasW&&o._hasH), flags:flags };
+    var ext=wdIsExternal(o), ty=wdType(o);
+    // Dimensions only matter for EXTERNAL doors/bifolds and windows — they drive
+    // lintels, cills, heads and brick deductions. Internal doors are standard-sized:
+    // the take-off only ever uses their count + kind (standard/bathroom/fire), never
+    // W×H, so an internal door with no recorded size is not an incomplete row.
+    var needsDims = ext || ty==='window';
+    return { o:o, ref:o.label||'Opening', type:ty, location:wdDoorLocation(o)||'',
+      external:ext, fireDoor:!!o.fireDoor, needsDims:needsDims,
+      complete: needsDims ? !!(o._hasW&&o._hasH) : true, flags:flags };
   });
 }
 // Soft, non-blocking signal only — the extractor's own door/window tallies have been
@@ -1086,6 +1093,7 @@ function openScheduleBuilder(data, proj, ht, fa){
 }
 function renderScheduleBuilder(){
   var m=lastModel;
+  mxSchedRows=mxAssembleOpeningSchedule(m);  // always fresh — never trust a snapshot from before the last edit
   var existing=document.getElementById('schedOverlay'); if(existing) existing.remove();
   var fund='<div class="sched-fund-strip">'
     +'<span><b>'+mxiFA(m).toFixed(1)+' m\u00b2</b> GIFA</span>'
@@ -1102,30 +1110,46 @@ function renderScheduleBuilder(){
   }
   var countNote=mxScheduleCountNote(m, mxSchedRows);
   var countNoteHTML=countNote?'<div class="sched-copy" style="color:var(--g)">'+countNote+'</div>':'';
-  var missingDoorsHTML=m._missingInternalDoorsNote?'<div class="sched-disagree">\u26a0 '+m._missingInternalDoorsNote+'</div>':'';
+  var missingDoorsHTML=m._missingInternalDoorsNote?'<div class="sched-disagree">\u26a0 '+m._missingInternalDoorsNote+' Use \u201cInternal Door\u201d below to add them in bulk by count \u2014 you don\u2019t need to enter each one\u2019s size or location.</div>':'';
   var rowsHTML=mxSchedRows.map(function(r,i){
     var statusPill=r.flags.length?'<span class="sched-pill sched-pill-flag">'+r.flags.join(' \u00b7 ')+'</span>'
       :r.complete?'<span class="sched-pill sched-pill-ok">Complete</span>'
       :'<span class="sched-pill sched-pill-gap">Needs dimensions</span>';
     var rowClass=r.flags.length?'sched-row-flagged':(!r.complete?'sched-row-incomplete':'');
-    var wCell=r.complete?(r.o.W+' m'):'<input type="number" step="0.001" min="0" class="sched-dim-input'+(r.o._hasW?'':' sched-empty')+'" data-idx="'+i+'" data-field="W" value="'+(r.o._hasW?r.o.W:'')+'" placeholder="width"/>';
-    var hCell=r.complete?(r.o.H+' m'):'<input type="number" step="0.001" min="0" class="sched-dim-input'+(r.o._hasH?'':' sched-empty')+'" data-idx="'+i+'" data-field="H" value="'+(r.o._hasH?r.o.H:'')+'" placeholder="height"/>';
-    return '<tr class="'+rowClass+'"><td>'+r.ref+'</td><td>'+r.type+(r.fireDoor?' (FD30)':'')+'</td><td>'+(r.location||'\u2014')+'</td>'
+    var typeOpts=['door','window','bifold'].map(function(t){return '<option value="'+t+'"'+(r.type===t?' selected':'')+'>'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>';}).join('');
+    var typeCell='<select class="sched-inline-select sched-type-select" data-idx="'+i+'">'+typeOpts+'</select>';
+    var locCell='<input type="text" class="sched-inline-input sched-loc-input" data-idx="'+i+'" value="'+(r.location||'').replace(/"/g,'&quot;')+'" placeholder="location"/>';
+    var wCell, hCell;
+    if(r.needsDims){
+      wCell='<input type="number" step="0.001" min="0" class="sched-dim-input'+(r.o._hasW?'':' sched-empty')+'" data-idx="'+i+'" data-field="W" value="'+(r.o._hasW?r.o.W:'')+'" placeholder="width"/>';
+      hCell='<input type="number" step="0.001" min="0" class="sched-dim-input'+(r.o._hasH?'':' sched-empty')+'" data-idx="'+i+'" data-field="H" value="'+(r.o._hasH?r.o.H:'')+'" placeholder="height"/>';
+    } else {
+      // Internal doors carry no structural dimensions in the take-off — qty + kind
+      // (standard/bathroom/fire) is all mxiCalc ever uses for them.
+      var kindVal=r.o.fireDoor?'fire':(r.o._doorKind==='bathroom'?'bathroom':'standard');
+      wCell='<input type="number" step="1" min="1" class="sched-dim-input" data-idx="'+i+'" data-field="qty" value="'+(r.o.qty||1)+'" placeholder="qty"/>';
+      hCell='<select class="sched-inline-select sched-kind-select" data-idx="'+i+'">'
+        +'<option value="standard"'+(kindVal==='standard'?' selected':'')+'>Standard</option>'
+        +'<option value="bathroom"'+(kindVal==='bathroom'?' selected':'')+'>Bathroom</option>'
+        +'<option value="fire"'+(kindVal==='fire'?' selected':'')+'>Fire (FD30)</option></select>';
+    }
+    return '<tr class="'+rowClass+'"><td>'+r.ref+'</td><td>'+typeCell+'</td><td>'+locCell+'</td>'
       +'<td>'+wCell+'</td><td>'+hCell+'</td><td>'+statusPill+'</td>'
       +'<td><button type="button" class="sched-remove" data-remove="'+i+'" title="Remove this opening">\u2715</button></td></tr>';
   }).join('');
   var html='<div class="sched-overlay" id="schedOverlay"><div class="sched-modal">'
     +'<h2>Opening Schedule</h2>'
-    +'<div class="sched-copy">We built this opening schedule from your drawings. A few openings are on the plan but we couldn\u2019t read their sizes \u2014 add the dimensions below so your take-off is based only on confirmed data. Flagged rows look like a misread rather than a real opening \u2014 remove them if the drawing agrees.</div>'
+    +'<div class="sched-copy">We built this opening schedule from your drawings. Rows needing dimensions are highlighted \u2014 fill them in so your take-off is based only on confirmed data. Flagged rows look like a misread: fix the type/location in place if the drawing shows a real (different) opening, or remove the row if it doesn\u2019t exist at all.</div>'
     +fund+disagreeHTML+missingDoorsHTML+countNoteHTML
-    +'<table class="sched-table"><thead><tr><th>Ref</th><th>Type</th><th>Location</th><th>Width</th><th>Height</th><th>Status</th><th></th></tr></thead><tbody id="schedTbody">'+rowsHTML+'</tbody></table>'
+    +'<table class="sched-table"><thead><tr><th>Ref</th><th>Type</th><th>Location</th><th>Width / Qty</th><th>Height / Kind</th><th>Status</th><th></th></tr></thead><tbody id="schedTbody">'+rowsHTML+'</tbody></table>'
     +'<div class="sched-add-row" id="schedAddRow">'
-      +'<select id="schedAddType"><option value="door">Door</option><option value="window">Window</option><option value="bifold">Bifold</option></select>'
-      +'<input type="text" id="schedAddLoc" placeholder="Location (e.g. Bedroom 2)"/>'
-      +'<input type="number" step="0.001" min="0" id="schedAddW" placeholder="Width (m)"/>'
-      +'<input type="number" step="0.001" min="0" id="schedAddH" placeholder="Height (m)"/>'
+      +'<select id="schedAddType"><option value="internal_door">Internal Door</option><option value="door">External Door</option><option value="window">Window</option><option value="bifold">Bifold</option></select>'
+      +'<input type="text" id="schedAddLoc" placeholder="Location (optional)"/>'
+      +'<input type="number" step="1" min="1" id="schedAddQty" placeholder="Qty" value="1"/>'
+      +'<input type="number" step="0.001" min="0" id="schedAddW" placeholder="Width (m)" style="display:none"/>'
+      +'<input type="number" step="0.001" min="0" id="schedAddH" placeholder="Height (m)" style="display:none"/>'
       +'<select id="schedAddDoorKind"><option value="standard">Standard</option><option value="bathroom">Bathroom (privacy set)</option><option value="fire">Fire (FD30)</option></select>'
-      +'<button type="button" class="sched-btn sched-btn-cancel" id="schedAddBtn">+ Add opening</button></div>'
+      +'<button type="button" class="sched-btn sched-btn-cancel" id="schedAddBtn">+ Add</button></div>'
     +'<div class="sched-footer"><span class="sched-gap-count" id="schedGapCount"></span>'
       +'<div style="display:flex;gap:.6rem">'
         +'<button type="button" class="sched-btn sched-btn-cancel" id="schedCancelBtn">Cancel</button>'
@@ -1138,11 +1162,37 @@ function renderScheduleBuilder(){
 function wireScheduleBuilder(){
   document.querySelectorAll('#schedTbody .sched-dim-input').forEach(function(inp){
     inp.addEventListener('change', function(){
-      var idx=parseInt(this.getAttribute('data-idx'),10), field=this.getAttribute('data-field');
-      var v=parseFloat(this.value), row=mxSchedRows[idx];
-      if(v>0){ row.o[field]=Math.round(v*1000)/1000; row.o['_has'+field]=true; }
-      else { row.o[field]=undefined; row.o['_has'+field]=false; }
-      row.complete=!!(row.o._hasW&&row.o._hasH);
+      var idx=parseInt(this.getAttribute('data-idx'),10), field=this.getAttribute('data-field'), row=mxSchedRows[idx];
+      if(field==='qty'){
+        var qv=parseInt(this.value,10); row.o.qty=(qv>=1)?qv:1;
+      } else {
+        var v=parseFloat(this.value);
+        if(v>0){ row.o[field]=Math.round(v*1000)/1000; row.o['_has'+field]=true; }
+        else { row.o[field]=undefined; row.o['_has'+field]=false; }
+        row.o._dupSuspect=false; row.o._heightSuspect=false;  // manual edit supersedes the automated guess
+      }
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-type-select').forEach(function(sel){
+    sel.addEventListener('change', function(){
+      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx];
+      row.o.type=this.value;
+      row.o._dupSuspect=false; row.o._heightSuspect=false;  // reclassifying is the correction
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-loc-input').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx];
+      row.o.location=this.value.trim();
+      renderScheduleBuilder();
+    });
+  });
+  document.querySelectorAll('#schedTbody .sched-kind-select').forEach(function(sel){
+    sel.addEventListener('change', function(){
+      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx];
+      row.o._doorKind=this.value; row.o.fireDoor=(this.value==='fire');
       renderScheduleBuilder();
     });
   });
@@ -1155,27 +1205,43 @@ function wireScheduleBuilder(){
     });
   });
   var typeSel=document.getElementById('schedAddType'), kindSel=document.getElementById('schedAddDoorKind'), locInp=document.getElementById('schedAddLoc');
-  if(typeSel&&kindSel){ kindSel.style.display=(typeSel.value==='door')?'':'none';
-    typeSel.addEventListener('change', function(){ kindSel.style.display=(this.value==='door')?'':'none'; }); }
+  var qtyInp=document.getElementById('schedAddQty'), wInp=document.getElementById('schedAddW'), hInp=document.getElementById('schedAddH');
+  function updateAddFormVisibility(){
+    var isInternal=(typeSel.value==='internal_door');
+    qtyInp.style.display=isInternal?'':'none';
+    wInp.style.display=isInternal?'none':'';
+    hInp.style.display=isInternal?'none':'';
+    kindSel.style.display=isInternal?'':'none';
+  }
+  if(typeSel){ updateAddFormVisibility(); typeSel.addEventListener('change', updateAddFormVisibility); }
   if(locInp&&kindSel){
     // Nudge, don't decide: typing "garage" pre-selects Fire (FD30) — the same rule
     // buildModel applies automatically to extracted rows — but the user can still
     // override it before clicking Add.
     locInp.addEventListener('input', function(){
-      if(typeSel.value==='door' && /garage/i.test(this.value)) kindSel.value='fire';
+      if(typeSel.value==='internal_door' && /garage/i.test(this.value)) kindSel.value='fire';
     });
   }
   var addBtn=document.getElementById('schedAddBtn');
   if(addBtn){ addBtn.addEventListener('click', function(){
-    var type=document.getElementById('schedAddType').value;
-    var loc=document.getElementById('schedAddLoc').value.trim();
-    var w=parseFloat(document.getElementById('schedAddW').value);
-    var h=parseFloat(document.getElementById('schedAddH').value);
-    if(!(w>0)||!(h>0)){ alert('Enter both a width and height before adding \u2014 an opening can\u2019t be counted without its dimensions.'); return; }
-    var kind=(type==='door')?document.getElementById('schedAddDoorKind').value:null;
-    var refN='ADD '+String(mxSchedRows.filter(function(r){return /^ADD/.test(r.ref);}).length+1).padStart(3,'0');
-    lastModel.openings.push({label:refN+(loc?(' \u2014 '+loc):''), W:Math.round(w*1000)/1000, H:Math.round(h*1000)/1000, qty:1,
-      type:type, external:false, fireDoor:(kind==='fire'), location:loc, meter_box:false, _hasW:true, _hasH:true, _addedManually:true, _doorKind:kind});
+    var type=typeSel.value, loc=locInp.value.trim();
+    if(type==='internal_door'){
+      // Bulk add by count — internal doors are standard-sized, the take-off only
+      // ever uses qty + kind (standard/bathroom/fire), never a per-item size or
+      // location, so this is one row per kind rather than one row per door.
+      var qty=parseInt(qtyInp.value,10);
+      if(!(qty>=1)){ alert('Enter how many internal doors to add.'); return; }
+      var kind=kindSel.value, kindLabel=kind==='fire'?'Fire (FD30)':kind==='bathroom'?'Bathroom':'Standard';
+      lastModel.openings.push({label:'Internal door'+(qty>1?'s':'')+' \u2014 '+kindLabel+(loc?(' \u2014 '+loc):''),
+        W:undefined, H:undefined, qty:qty, type:'door', external:false, fireDoor:(kind==='fire'),
+        location:loc, meter_box:false, _hasW:false, _hasH:false, _addedManually:true, _doorKind:kind});
+    } else {
+      var w=parseFloat(wInp.value), h=parseFloat(hInp.value);
+      if(!(w>0)||!(h>0)){ alert('Enter both a width and height before adding \u2014 an opening can\u2019t be counted without its dimensions.'); return; }
+      var refN='ADD '+String(mxSchedRows.filter(function(r){return /^ADD/.test(r.ref);}).length+1).padStart(3,'0');
+      lastModel.openings.push({label:refN+(loc?(' \u2014 '+loc):''), W:Math.round(w*1000)/1000, H:Math.round(h*1000)/1000, qty:1,
+        type:type, external:true, fireDoor:false, location:loc, meter_box:false, _hasW:true, _hasH:true, _addedManually:true});
+    }
     mxSchedRows=mxAssembleOpeningSchedule(lastModel);
     renderScheduleBuilder();
   }); }
@@ -1186,9 +1252,9 @@ function wireScheduleBuilder(){
   }); }
   var confirmBtn=document.getElementById('schedConfirmBtn');
   if(confirmBtn){ confirmBtn.addEventListener('click', confirmScheduleBuilder); }
-  var lIn=document.getElementById('schedFloorL'), wIn=document.getElementById('schedFloorW');
+  var lIn=document.getElementById('schedFloorL'), wIn2=document.getElementById('schedFloorW');
   if(lIn) lIn.addEventListener('change', function(){ var v=parseFloat(this.value); if(v>0) lastModel.floor.L=Math.round(v*1000)/1000; });
-  if(wIn) wIn.addEventListener('change', function(){ var v=parseFloat(this.value); if(v>0) lastModel.floor.W=Math.round(v*1000)/1000; });
+  if(wIn2) wIn2.addEventListener('change', function(){ var v=parseFloat(this.value); if(v>0) lastModel.floor.W=Math.round(v*1000)/1000; });
 }
 function updateScheduleGapState(){
   var incomplete=mxSchedRows.filter(function(r){return !r.complete;}).length;
@@ -1516,7 +1582,7 @@ function internalDoorCount(){
   return lastModel.openings.filter(function(o){
     var ty=wdType(o);
     if(ty==='window'||ty==='bifold') return false;
-    return !wdIsExternal(o);
+    return !wdIsExternal(o) && !o._meterBox && !o._dupSuspect && !o._heightSuspect;
   }).reduce(function(a,o){return a+(o.qty||1);},0);
 }
 function wdRef(o,i){
