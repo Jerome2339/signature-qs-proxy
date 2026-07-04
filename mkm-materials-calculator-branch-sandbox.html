@@ -421,6 +421,7 @@ async function analyse(){
     if(!resp_data.success || !resp_data.data) throw new Error('No data returned');
     const data = resp_data.data;
     lastResult = data;
+    window._lastData = data;  // available immediately, even before the schedule is confirmed
 
     log('Extraction complete', 'done');
 
