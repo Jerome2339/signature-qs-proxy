@@ -852,14 +852,20 @@ function mxiCalc(m){
     // fabricated here; only the leaf/lining count (the actual ordering-critical bit
     // Jerome flagged) is doubled.
     function mxLeafQty(o){ return (o.qty||1)*(o._double?2:1); }
-    function mxWidthQty(objs){ var w={'838':0,'762':0}; objs.forEach(function(o){ var k=(o._leafWidth==='762')?'762':'838'; w[k]+=mxLeafQty(o); }); return w; }
+    // Bucket leaf quantities by ACTUAL leaf width — any of 533/610/686/762/838 (or a
+    // future value); no longer assumes just two sizes. Returns {width:qty,...}.
+    function mxWidthQty(objs){ var w={}; objs.forEach(function(o){ var k=o._leafWidth||'838'; w[k]=(w[k]||0)+mxLeafQty(o); }); return w; }
+    // Emit one take-off line per distinct width present, widest first for a tidy schedule.
+    function mxPushWidthLines(wmap, item, note){
+      Object.keys(wmap).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);}).forEach(function(lw){
+        if(wmap[lw]>0) mats.push({cat:'Second Fix Joinery',item:item+' \u2014 '+lw+'mm',qty:Math.ceil(wmap[lw]),unit:'nr',note:note,basis:wmap[lw]+' door leaves ('+lw+'mm)'});
+      });
+    }
 
     // Lining set — every internal door needs one regardless of kind, and each door's
     // own _leafWidth is real data (defaulted 838mm ground/762mm first, user-editable
     // in the schedule), so this split is exact, not an estimate.
-    var liningW=mxWidthQty(internalDoors);
-    if(liningW['838']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door lining set sw \u2014 838mm',qty:Math.ceil(liningW['838']),unit:'nr',note:'32x115mm head + 2 legs per door leaf',basis:liningW['838']+' door leaves (838mm)'});
-    if(liningW['762']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door lining set sw \u2014 762mm',qty:Math.ceil(liningW['762']),unit:'nr',note:'32x115mm head + 2 legs per door leaf',basis:liningW['762']+' door leaves (762mm)'});
+    mxPushWidthLines(mxWidthQty(internalDoors), 'Internal door lining set sw', '32x115mm head + 2 legs per door leaf');
 
     // Fire doors (FD30) — flagged in the schedule notes (e.g. integral-garage door)
     var fireDoors=internalDoors.filter(function(o){return o.fireDoor;}).reduce(function(a,o){return a+(o.qty||1);},0);
@@ -888,15 +894,17 @@ function mxiCalc(m){
       var standardObjs=nonFireObjs.filter(function(o){ return bathroomObjs.indexOf(o)===-1; });
       stdW=mxWidthQty(standardObjs);
     } else {
-      var allW=mxWidthQty(nonFireObjs), totalW=allW['838']+allW['762'];
-      var ratio838=totalW>0?allW['838']/totalW:1;
-      var std838=Math.round(standardDoors*ratio838);
-      stdW={'838':std838,'762':standardDoors-std838};
+      // Distribute the estimated standard count across the observed width mix.
+      var allW=mxWidthQty(nonFireObjs); var totalW=0; Object.keys(allW).forEach(function(k){totalW+=allW[k];});
+      stdW={}; var assigned=0; var wkeys=Object.keys(allW).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);});
+      wkeys.forEach(function(k,ix){
+        if(ix===wkeys.length-1){ stdW[k]=standardDoors-assigned; }
+        else { var n=Math.round(standardDoors*(allW[k]/(totalW||1))); stdW[k]=n; assigned+=n; }
+      });
     }
 
     if(standardDoors>0){
-      if(stdW['838']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 35mm solid core flush \u2014 838mm',qty:Math.ceil(stdW['838']),unit:'nr',note:'Pre-primed, to be painted',basis:stdW['838']+' doors (838mm)'});
-      if(stdW['762']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 35mm solid core flush \u2014 762mm',qty:Math.ceil(stdW['762']),unit:'nr',note:'Pre-primed, to be painted',basis:stdW['762']+' doors (762mm)'});
+      mxPushWidthLines(stdW, 'Internal door 35mm solid core flush', 'Pre-primed, to be painted');
       mats.push({cat:'Second Fix Joinery',item:'Lever handle on rose satin chrome',qty:Math.ceil(standardDoors),unit:'sets',note:'Pair per door',basis:standardDoors+' doors'});
       mats.push({cat:'Second Fix Joinery',item:'Tubular latch 63mm',qty:Math.ceil(standardDoors),unit:'nr',note:'1 per door',basis:standardDoors+' doors'});
       mats.push({cat:'Second Fix Joinery',item:'Door stops floor/wall mounted',qty:Math.ceil(standardDoors),unit:'nr',note:'1 per door',basis:standardDoors+' doors'});
@@ -905,9 +913,7 @@ function mxiCalc(m){
       // Only split the bathroom leaf by width when it's backed by real objects (bLoc>0)
       // — an estimated count has no specific doors to attribute a width to.
       if(bLoc>0){
-        var bathW=mxWidthQty(bathroomObjs);
-        if(bathW['838']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom) \u2014 838mm',qty:Math.ceil(bathW['838']),unit:'nr',note:'Solid core for privacy',basis:bathW['838']+' doors (838mm)'});
-        if(bathW['762']>0) mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom) \u2014 762mm',qty:Math.ceil(bathW['762']),unit:'nr',note:'Solid core for privacy',basis:bathW['762']+' doors (762mm)'});
+        mxPushWidthLines(mxWidthQty(bathroomObjs), 'Internal door 40mm solid core (bathroom)', 'Solid core for privacy');
       } else {
         mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom)',qty:Math.ceil(bathroomDoors),unit:'nr',note:'Solid core for privacy \u2014 width not split, count is estimated',basis:bathBasis});
       }
@@ -1193,6 +1199,7 @@ function renderScheduleBuilder(){
   var countNote=mxScheduleCountNote(m, mxSchedRows);
   var countNoteHTML=countNote?'<div class="sched-copy" style="color:var(--g)">'+countNote+'</div>':'';
   var missingDoorsHTML=m._missingInternalDoorsNote?'<div class="sched-disagree">\u26a0 '+m._missingInternalDoorsNote+'</div>':'';
+  var emptyHTML=(mxSchedRows.length===0)?'<div class="sched-disagree">\u26a0 No windows or doors were extracted from this drawing. This can happen when the opening schedule isn\u2019t on the uploaded sheet, or couldn\u2019t be read. Build the schedule yourself below: use \u201c+ Add\u201d for each external door and window (with its width &amp; height from your openings schedule), and \u201cInternal Door\u201d to add internal doors by count.</div>':'';
   var rowsHTML=mxSchedRows.map(function(r,i){
     var statusPill=r.suspect?'<span class="sched-pill sched-pill-flag">'+r.flags.join(' \u00b7 ')+'</span>'
       :r.suggested?'<span class="sched-pill sched-pill-gap">'+r.flags.join(' \u00b7 ')+'</span>'
@@ -1219,8 +1226,8 @@ function renderScheduleBuilder(){
           +'<option value="bathroom"'+(kindVal==='bathroom'?' selected':'')+'>Bathroom</option>'
           +'<option value="fire"'+(kindVal==='fire'?' selected':'')+'>Fire (FD30)</option></select>'
         +'<select class="sched-inline-select sched-leaf-select" data-idx="'+i+'" style="width:auto">'
-          +'<option value="838"'+(r.o._leafWidth==='838'?' selected':'')+'>838mm</option>'
-          +'<option value="762"'+(r.o._leafWidth==='762'?' selected':'')+'>762mm</option></select>'
+          +['838','762','686','610','533'].map(function(lw){return '<option value="'+lw+'"'+(r.o._leafWidth===lw?' selected':'')+'>'+lw+'mm</option>';}).join('')
+          +'</select>'
         +'<label style="font-size:11px;color:var(--mu);display:flex;align-items:center;gap:3px;white-space:nowrap"><input type="checkbox" class="sched-double-check" data-idx="'+i+'"'+(r.o._double?' checked':'')+'/> 2x</label>'
         +'</div>';
     }
@@ -1231,7 +1238,7 @@ function renderScheduleBuilder(){
   var html='<div class="sched-overlay" id="schedOverlay"><div class="sched-modal">'
     +'<h2>Opening Schedule</h2>'
     +'<div class="sched-copy">We built this opening schedule from your drawings. Rows needing dimensions are highlighted \u2014 fill them in so your take-off is based only on confirmed data. Flagged rows look like a misread: fix the type/location in place if the drawing shows a real (different) opening, or remove the row if it doesn\u2019t exist at all.</div>'
-    +fund+disagreeHTML+missingDoorsHTML+countNoteHTML
+    +fund+disagreeHTML+missingDoorsHTML+emptyHTML+countNoteHTML
     +'<table class="sched-table"><thead><tr><th>Ref</th><th>Type</th><th>Location</th><th>Width / Qty</th><th>Height / Kind</th><th>Status</th><th></th></tr></thead><tbody id="schedTbody">'+rowsHTML+'</tbody></table>'
     +'<div class="sched-add-row" id="schedAddRow">'
       +'<select id="schedAddType"><option value="internal_door">Internal Door</option><option value="door">External Door</option><option value="window">Window</option><option value="bifold">Bifold</option></select>'
@@ -1385,9 +1392,12 @@ function updateScheduleGapState(){
   if(incomplete) bits.push(incomplete+' opening(s) still need dimensions');
   if(suspect) bits.push(suspect+' flagged row(s) to review');
   if(suggested) bits.push(suggested+' suggested count(s) to confirm');
-  if(el) el.textContent=bits.length?bits.join(' \u00b7 ')+(incomplete?'':' \u2014 not blocking'):'All openings complete';
+  if(el){
+    if(mxSchedRows.length===0) el.textContent='No openings were extracted from this drawing \u2014 add every window and door below before generating the take-off.';
+    else el.textContent=bits.length?bits.join(' \u00b7 ')+(incomplete?'':' \u2014 not blocking'):'All openings complete';
+  }
   var btn=document.getElementById('schedConfirmBtn');
-  if(btn) btn.disabled=incomplete>0;
+  if(btn) btn.disabled=(incomplete>0)||(mxSchedRows.length===0);
 }
 async function confirmScheduleBuilder(){
   var ctx=mxSchedCtx, m=lastModel;
