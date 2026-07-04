@@ -438,30 +438,52 @@ async function analyse(){
       return false;
     }
 
-    let data = null, tries = 0;
+    let data = null, tries = 0, gotAnyResponse = false, lastErr = null;
     while(tries < MAX_TRIES){
       tries++;
       if(tries === 1) log('AI reading title block, schedules, elevations...');
       else log('Re-checking the drawing for openings (attempt ' + tries + ' of ' + MAX_TRIES + ')\u2026');
 
-      const resp = await fetch(PROXY + '/analyse-drawing', { method:'POST', body: fd });
-      if(resp.status === 429){
-        let m = 'This branch has reached its monthly limit. Please contact your administrator.';
-        try { const j = await resp.json(); if(j && j.message) m = j.message; } catch(e){}
-        log(m, 'error');
-        analyseBtn.disabled = false;
-        return;
+      let thisData = null;
+      try {
+        const resp = await fetch(PROXY + '/analyse-drawing', { method:'POST', body: fd });
+        if(resp.status === 429){
+          // Rate/quota limit is terminal — retrying won't help, so stop immediately.
+          let m = 'This branch has reached its monthly limit. Please contact your administrator.';
+          try { const j = await resp.json(); if(j && j.message) m = j.message; } catch(e){}
+          log(m, 'error');
+          analyseBtn.disabled = false;
+          feeCheck.disabled = false;
+          return;
+        }
+        if(!resp.ok) throw new Error('Server error ' + resp.status);
+        const resp_data = await resp.json();
+        if(!resp_data.success || !resp_data.data) throw new Error('No data returned');
+        thisData = resp_data.data;
+        gotAnyResponse = true;
+      } catch(attemptErr){
+        // Transient failure (timeout, dropped connection, "failed to fetch") on THIS
+        // attempt — don't abort the whole analysis. Log it, keep any earlier good
+        // result, and let the loop try again. Only if every attempt fails this way
+        // do we surface an error (handled after the loop).
+        lastErr = attemptErr;
+        if(tries < MAX_TRIES) log('Attempt ' + tries + ' didn\u2019t complete (' + attemptErr.message + ') \u2014 retrying\u2026', 'warn');
+        continue;
       }
-      if(!resp.ok) throw new Error('Server error ' + resp.status);
-      const resp_data = await resp.json();
-      if(!resp_data.success || !resp_data.data) throw new Error('No data returned');
-      const thisData = resp_data.data;
 
       // Keep whichever attempt has the most openings so far.
       if(openingRichness(thisData) > openingRichness(data)) data = thisData;
 
       if(!looksThin(data)) break;  // good enough — stop retrying
       // else loop and try again (same upload) up to MAX_TRIES
+    }
+
+    // If no attempt ever returned a usable response, this is a real failure — surface it.
+    if(!gotAnyResponse || !data){
+      log('Couldn\u2019t reach the analysis service after ' + tries + ' attempt(s)' + (lastErr ? ' (' + lastErr.message + ')' : '') + ' \u2014 no fee charged. Please try again.', 'error');
+      analyseBtn.disabled = false;
+      feeCheck.disabled = false;
+      return;
     }
 
     lastResult = data;
