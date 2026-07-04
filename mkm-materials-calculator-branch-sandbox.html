@@ -672,12 +672,15 @@ function mxiCalc(m){
   var rooms2=(m.extractedSpec&&m.extractedSpec.rooms)||[];
   var nRooms=rooms2.length||0;
   var nIntDoors=(typeof internalDoorCount==='function')?internalDoorCount():0;
-  // partition multiplier: base 1.3 (open plan) → up to ~1.9 (heavily divided).
-  // Each room and internal door nudges it up. Tuned so a chopped-up 3-bed
-  // (Middleham: 14 rooms, 12 io doors) lands ~1.8, an open-plan house ~1.4.
+  // partition multiplier: partition wall area = GIFA x partMult.
+  // CALIBRATED against Jerome's 6-house measured actuals (Middleham, Maidwell-R,
+  // Haselbech, Cottesbrooke, Buckby, Lamport) — implied partMult clustered ~1.0-1.15,
+  // so base is 0.9 rising to ~1.25 for a heavily divided house (was 1.3-1.9, which
+  // over-read partition area by ~58% across every measured house). Room/door
+  // responsiveness kept, just scaled to reality.
   var partMult;
-  if(nRooms||nIntDoors){ partMult=1.3 + Math.min(0.6, (nRooms*0.022)+(nIntDoors*0.014)); }
-  else { partMult=1.7; } // fallback when neither read
+  if(nRooms||nIntDoors){ partMult=0.90 + Math.min(0.35, (nRooms*0.013)+(nIntDoors*0.008)); }
+  else { partMult=1.05; } // fallback when neither read
   var totalFloor=(faGround||0)+(faFirst||0); if(!(totalFloor>0)) totalFloor=fa;
   // allow a user override of the estimated internal wall AREA (whole-house m2)
   var intWallAreaTotal=(m._intWallAreaOverride>0)?m._intWallAreaOverride
@@ -875,16 +878,33 @@ function mxiCalc(m){
   // \u2500\u2500 FIXINGS & SUNDRIES \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
   // ── RAINWATER GOODS ─────────────────────────────────────────────────────
-  var fasciaRun=m.roofType==='pitched'?(rln+ov*2)*2+(sp+ov*2)*2:perim;
-  var gutterRun=m.roofType==='pitched'?(rln+ov*2)*2:perim;
-  var dpCount=Math.max(2,Math.ceil(gutterRun/12));
+  // Fascia + soffit run all four eaves/verge sides. GUTTER runs only the two
+  // eaves (the fascias down from the ridge) — NOT the apex/gable sides — per
+  // Jerome's site rule. Bracket/bend rules also his: gutter brackets 2/lin m,
+  // fall-pipe brackets 1/lin m, 2no 45° bends per fall pipe.
+  // Fascia, soffit AND gutter all run the two eaves only (the fascias down from the
+  // ridge), NOT the gable/apex verges — confirmed across Jerome's 6-house measured
+  // actuals, where fascia/soffit came in at the same length as gutter (~half the old
+  // all-four-sides figure). NOTE: calibrated on gable-ended house types; re-check if a
+  // hipped or mono-pitch type (e.g. Spaunton) shows fascia running additional sides.
+  var eavesRun=m.roofType==='pitched'?(rln+ov*2)*2:perim;  // two eaves runs
+  var fasciaRun=eavesRun;
+  var gutterRun=eavesRun;
+  // Downpipe count: default 4 drops per house (Jerome's site rule — typically one
+  // near each corner). Scales up only for atypically long gutter runs (>~48m) so a
+  // very large house still gets enough; never drops below 4 for a standard dwelling.
+  var dpCount=Math.max(4,Math.ceil(gutterRun/12));
   var dpHeight=mxFN(m.ceilingH)*2*1.2; // two storeys approx x 1.2 for offsets
-  mats.push({cat:'Rainwater Goods',item:'uPVC fascia board 150mm',qty:mxF2(fasciaRun*MXW),unit:'lin m',note:'Eaves + gable ends both sides',basis:fasciaRun.toFixed(1)+'m'});
-  mats.push({cat:'Rainwater Goods',item:'uPVC soffit board 225mm vented',qty:mxF2(fasciaRun*MXW),unit:'lin m',note:'Continuous vented soffit at eaves',basis:fasciaRun.toFixed(1)+'m'});
-  mats.push({cat:'Rainwater Goods',item:'uPVC half-round gutter 112mm',qty:mxF2(gutterRun*MXW),unit:'lin m',note:'Both eaves runs',basis:gutterRun.toFixed(1)+'m'});
-  mats.push({cat:'Rainwater Goods',item:'Gutter angles, stop ends & unions',qty:Math.ceil((4+Math.ceil(gutterRun/4))),unit:'nr',note:'4 corners + unions at 4m centres',basis:'Est.'});
-  mats.push({cat:'Rainwater Goods',item:'uPVC round downpipe 68mm',qty:mxF2(dpCount*dpHeight*MXW),unit:'lin m',note:'Inc. 20% for offsets',basis:dpCount+' downpipes'});
-  mats.push({cat:'Rainwater Goods',item:'Downpipe shoes, offset bends & brackets',qty:Math.ceil(dpCount*3),unit:'nr',note:'Shoe + offset + brackets per downpipe',basis:dpCount+' downpipes'});
+  var dpRun=dpCount*dpHeight;          // total downpipe length (pre-wastage)
+  mats.push({cat:'Rainwater Goods',item:'uPVC fascia board 150mm',qty:mxF2(fasciaRun*MXW),unit:'lin m',note:'Two eaves runs only',basis:fasciaRun.toFixed(1)+'m'});
+  mats.push({cat:'Rainwater Goods',item:'uPVC soffit board 225mm vented',qty:mxF2(fasciaRun*MXW),unit:'lin m',note:'Vented soffit at two eaves',basis:fasciaRun.toFixed(1)+'m'});
+  mats.push({cat:'Rainwater Goods',item:'uPVC half-round gutter 112mm',qty:mxF2(gutterRun*MXW),unit:'lin m',note:'Two eaves runs only — not gable/apex sides',basis:gutterRun.toFixed(1)+'m'});
+  mats.push({cat:'Rainwater Goods',item:'Gutter brackets (fascia)',qty:Math.ceil(gutterRun*2),unit:'nr',note:'2 per lin m of gutter',basis:gutterRun.toFixed(1)+'m x2'});
+  mats.push({cat:'Rainwater Goods',item:'Gutter angles, stop ends & unions',qty:Math.ceil((4+Math.ceil(gutterRun/4))),unit:'nr',note:'Corners + unions at 4m centres',basis:'Est.'});
+  mats.push({cat:'Rainwater Goods',item:'uPVC round downpipe 68mm',qty:mxF2(dpRun*MXW),unit:'lin m',note:'Inc. 10% for offsets',basis:dpCount+' downpipes'});
+  mats.push({cat:'Rainwater Goods',item:'Downpipe brackets',qty:Math.ceil(dpRun),unit:'nr',note:'1 per lin m of fall pipe',basis:dpRun.toFixed(1)+'m x1'});
+  mats.push({cat:'Rainwater Goods',item:'Downpipe 45\u00b0 offset bends',qty:Math.ceil(dpCount*2),unit:'nr',note:'2 x 45\u00b0 bends per fall pipe',basis:dpCount+' downpipes x2'});
+  mats.push({cat:'Rainwater Goods',item:'Downpipe shoes',qty:Math.ceil(dpCount),unit:'nr',note:'1 shoe per fall pipe',basis:dpCount+' downpipes'});
 
 
   // ── SECOND FIX JOINERY ──────────────────────────────────────────────────
