@@ -409,23 +409,66 @@ async function analyse(){
     fd.append('branch', branchNo.value.trim());
     fd.append('client', CLIENT);
 
-    log('AI reading title block, schedules, elevations...');
-    const resp = await fetch(PROXY + '/analyse-drawing', { method:'POST', body: fd });
-    if(resp.status === 429){
-      let m = 'This branch has reached its monthly limit. Please contact your administrator.';
-      try { const j = await resp.json(); if(j && j.message) m = j.message; } catch(e){}
-      log(m, 'error');
-      analyseBtn.disabled = false;
-      return;
+    // ── Extraction with retry-on-empty ──────────────────────────────────────
+    // Extraction is a non-deterministic AI vision step: the same drawing can come
+    // back near-perfect one run and empty the next. When a result looks empty or
+    // suspiciously thin, we silently re-run (up to MAX_TRIES total) and keep the
+    // RICHEST result seen, since a second attempt often succeeds where the first
+    // failed. This is best-effort quality improvement, never fabrication — if every
+    // attempt comes back empty, we surface the honest empty schedule as before.
+    // NOTE: /analyse-drawing is the billable AI call server-side; retries here mean
+    // the proxy may run the model more than once. That's an accepted cost trade for
+    // reliability, and the USER is still only billed once (on confirmed render).
+    const MAX_TRIES = 3;
+    function openingRichness(d){
+      if(!d) return -1;
+      var ops = (d.openings||[]).filter(function(o){ return o && !o.meter_box && o.type!=='meter_box'; });
+      return ops.length;
     }
-    if(!resp.ok) throw new Error('Server error ' + resp.status);
-    const resp_data = await resp.json();
-    if(!resp_data.success || !resp_data.data) throw new Error('No data returned');
-    const data = resp_data.data;
+    function looksThin(d){
+      if(!d) return true;
+      var n = openingRichness(d);
+      if(n === 0) return true;  // nothing at all — always worth another go
+      // If the extractor's OWN tallies claim more than it actually listed, the detail
+      // pass under-delivered — a re-run may fill it. Only trip when the shortfall is
+      // material (>3 openings missing vs its own count), to avoid chasing tiny gaps.
+      var ex = d.extra || {};
+      var claimed = (ex.door_count||0) + (ex.window_count||0);
+      if(claimed > 0 && (claimed - n) > 3) return true;
+      return false;
+    }
+
+    let data = null, tries = 0;
+    while(tries < MAX_TRIES){
+      tries++;
+      if(tries === 1) log('AI reading title block, schedules, elevations...');
+      else log('Re-checking the drawing for openings (attempt ' + tries + ' of ' + MAX_TRIES + ')\u2026');
+
+      const resp = await fetch(PROXY + '/analyse-drawing', { method:'POST', body: fd });
+      if(resp.status === 429){
+        let m = 'This branch has reached its monthly limit. Please contact your administrator.';
+        try { const j = await resp.json(); if(j && j.message) m = j.message; } catch(e){}
+        log(m, 'error');
+        analyseBtn.disabled = false;
+        return;
+      }
+      if(!resp.ok) throw new Error('Server error ' + resp.status);
+      const resp_data = await resp.json();
+      if(!resp_data.success || !resp_data.data) throw new Error('No data returned');
+      const thisData = resp_data.data;
+
+      // Keep whichever attempt has the most openings so far.
+      if(openingRichness(thisData) > openingRichness(data)) data = thisData;
+
+      if(!looksThin(data)) break;  // good enough — stop retrying
+      // else loop and try again (same upload) up to MAX_TRIES
+    }
+
     lastResult = data;
     window._lastData = data;  // available immediately, even before the schedule is confirmed
 
-    log('Extraction complete', 'done');
+    if(openingRichness(data) <= 0 && tries > 1) log('Extraction came back empty after ' + tries + ' attempts \u2014 you can still build the schedule by hand below.', 'done');
+    else log('Extraction complete', 'done');
 
     const proj = document.getElementById('projName').value || 'Unnamed project';
     const ht = document.getElementById('houseType').value || '';
