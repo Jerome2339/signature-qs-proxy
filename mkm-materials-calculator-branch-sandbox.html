@@ -1214,10 +1214,30 @@ function buildModel(parsed, projName, clientName){
 // the 838mm fallback) if there's nothing to match against — never guesses harder than
 // the data supports.
 function mxInferDoorFloor(o, rooms){
+  // Try several signals, most reliable first, so the "838 ground / 762 first" default
+  // applies as widely as possible (only truly falls back to ground when nothing at all
+  // indicates the floor — and even then the confirmation step lets the user correct it).
+  // 1) Opening's own floor field if the extractor supplied one.
+  if(o && typeof o.floor==='string'){
+    if(/first|1st|upper/i.test(o.floor)) return 'first';
+    if(/ground|0|gf/i.test(o.floor)) return 'ground';
+  }
+  // 2) Explicit floor words in the label/location text.
+  var txt=((o&&o.label)||'')+' '+(wdDoorLocation(o)||'');
+  if(/first floor|1st floor|upper floor/i.test(txt)) return 'first';
+  if(/ground floor|gf\b/i.test(txt)) return 'ground';
+  // 3) Room-name match against the extracted room list (original method).
   var loc=(wdDoorLocation(o)||'').toLowerCase().trim();
-  if(!loc || !rooms || !rooms.length) return null;
-  var hit=rooms.filter(function(r){ var rn=((r&&r.name)||'').toLowerCase().trim(); return rn && (loc.indexOf(rn)>=0 || rn.indexOf(loc)>=0); })[0];
-  return hit ? (hit.floor||null) : null;
+  if(loc && rooms && rooms.length){
+    var hit=rooms.filter(function(r){ var rn=((r&&r.name)||'').toLowerCase().trim(); return rn && (loc.indexOf(rn)>=0 || rn.indexOf(loc)>=0); })[0];
+    if(hit && hit.floor) return hit.floor;
+  }
+  // 4) Room-TYPE heuristic: bedrooms/bathrooms/en-suites/dressing/landing are almost
+  //    always first-floor in a 2-storey house; hall/kitchen/utility/wc/living/dining/
+  //    garage are ground. A useful tie-breaker when there's no explicit floor data.
+  if(/bedroom|\bbed\b|en[-\s]?suite|ensuite|dressing|landing|bathroom|shower/i.test(txt)) return 'first';
+  if(/hall|kitchen|utility|\bw\.?c\b|cloak|living|lounge|dining|garage|entry/i.test(txt)) return 'ground';
+  return null;  // genuinely unknown → caller defaults to ground (838), user can correct
 }
 function mxAssembleOpeningSchedule(m){
   return m.openings.filter(function(o){ return !o._meterBox; }).map(function(o){
