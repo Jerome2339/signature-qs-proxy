@@ -425,10 +425,30 @@ async function analyse(){
       var ops = (d.openings||[]).filter(function(o){ return o && !o.meter_box && o.type!=='meter_box'; });
       return ops.length;
     }
+    function internalDoorsFound(d){
+      if(!d) return 0;
+      return (d.openings||[]).filter(function(o){
+        if(!o || o.meter_box || o.type==='meter_box') return false;
+        var lbl=(o.label||'').trim();
+        if(/^\s*io[\s\d]/i.test(lbl)) return true;                 // io-prefixed = internal
+        if(/^\s*EO[\s\d]/i.test(lbl)) return false;                // EO = external
+        return (o.external===false);                               // explicit internal flag
+      }).length;
+    }
+    function enclosedRoomsPresent(d){
+      var rooms=(d && d.extra && d.extra.rooms)||[];
+      var re=/bedroom|bathroom|en[-\s]?suite|ensuite|cloak|\bw\.?c\.?\b|utility|\bstore\b|dressing|garage/i;
+      return rooms.filter(function(r){ return re.test(((r&&r.type)||'')+' '+((r&&r.name)||'')); }).length;
+    }
     function looksThin(d){
       if(!d) return true;
       var n = openingRichness(d);
       if(n === 0) return true;  // nothing at all — always worth another go
+      // Whorlton failure mode: plenty of windows/external doors extracted, but ZERO
+      // internal doors, while the room list clearly has rooms that need them. The
+      // count check below can't see this (the extractor's door_count only tallies what
+      // it found), so check it explicitly — a re-run often recovers the internal doors.
+      if(internalDoorsFound(d)===0 && enclosedRoomsPresent(d)>=3) return true;
       // If the extractor's OWN tallies claim more than it actually listed, the detail
       // pass under-delivered — a re-run may fill it. Only trip when the shortfall is
       // material (>3 openings missing vs its own count), to avoid chasing tiny gaps.
@@ -471,8 +491,12 @@ async function analyse(){
         continue;
       }
 
-      // Keep whichever attempt has the most openings so far.
-      if(openingRichness(thisData) > openingRichness(data)) data = thisData;
+      // Keep whichever attempt is RICHEST. Internal doors are weighted heavily (×5)
+      // because a run that recovers the internal-door set is far more valuable than one
+      // with a stray extra window — this is the Whorlton case, where the difference
+      // between attempts is 14 internal doors, not one opening.
+      function richScore(d){ return openingRichness(d) + internalDoorsFound(d)*5; }
+      if(richScore(thisData) > richScore(data)) data = thisData;
 
       if(!looksThin(data)) break;  // good enough — stop retrying
       // else loop and try again (same upload) up to MAX_TRIES
