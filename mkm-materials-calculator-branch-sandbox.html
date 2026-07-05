@@ -979,12 +979,18 @@ function mxiCalc(m){
       var standardObjs=nonFireObjs.filter(function(o){ return bathroomObjs.indexOf(o)===-1; });
       stdW=mxLeafWidthQty(standardObjs);
     } else {
-      // Distribute the estimated standard count across the observed width mix.
-      var allW=mxLeafWidthQty(nonFireObjs); var totalW=0; Object.keys(allW).forEach(function(k){totalW+=allW[k];});
-      stdW={}; var assigned=0; var wkeys=Object.keys(allW).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);});
+      // No location text pins which doors are wet-room, so we can't identify specific
+      // bathroom objects. But we MUST still count every leaf (incl. the extra leaf on a
+      // double) — so take the FULL non-fire leaf width map, then subtract the estimated
+      // bathroom leaves proportionally. This keeps the total leaf count exact (doubles
+      // preserved) while still splitting standard vs bathroom by estimate.
+      var allW=mxLeafWidthQty(nonFireObjs); var totalLeaves=0; Object.keys(allW).forEach(function(k){totalLeaves+=allW[k];});
+      // bathroom leaves to remove (estimate, proportional to width mix)
+      stdW={}; var wkeys=Object.keys(allW).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);});
+      var bathRemoved=0;
       wkeys.forEach(function(k,ix){
-        if(ix===wkeys.length-1){ stdW[k]=standardDoors-assigned; }
-        else { var n=Math.round(standardDoors*(allW[k]/(totalW||1))); stdW[k]=n; assigned+=n; }
+        if(ix===wkeys.length-1){ stdW[k]=Math.max(0, allW[k]-(bathroomDoors-bathRemoved)); }
+        else { var rm=Math.round(bathroomDoors*(allW[k]/(totalLeaves||1))); stdW[k]=Math.max(0, allW[k]-rm); bathRemoved+=rm; }
       });
     }
 
