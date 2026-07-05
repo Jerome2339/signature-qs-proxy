@@ -934,23 +934,23 @@ function mxiCalc(m){
     // Leaf/lining qty contribution: a double door needs 2 leaves. Hardware (hinges,
     // handles, latches, locks) is left as-is per opening for now — genuine double-door
     // furniture (e.g. flush bolts on the inactive leaf) varies by spec and isn't
-    // fabricated here; only the leaf/lining count (the actual ordering-critical bit
-    // Jerome flagged) is doubled.
-    function mxLeafQty(o){ return (o.qty||1)*(o._double?2:1); }
-    // Bucket leaf quantities by ACTUAL leaf width — any of 533/610/686/762/838 (or a
-    // future value); no longer assumes just two sizes. Returns {width:qty,...}.
-    function mxWidthQty(objs){ var w={}; objs.forEach(function(o){ var k=o._leafWidth||'838'; w[k]=(w[k]||0)+mxLeafQty(o); }); return w; }
-    // Emit one take-off line per distinct width present, widest first for a tidy schedule.
-    function mxPushWidthLines(wmap, item, note){
+    // A double door = TWO leaves in ONE frame. So leaf/door counts double, but the
+    // lining set (frame), latch, handle set and door stop are all ONE per opening.
+    function mxLeafQty(o){ return (o.qty||1)*(o._double?2:1); }   // physical door leaves
+    function mxFrameQty(o){ return (o.qty||1); }                  // frames/linings — 1 per opening even if double
+    // Bucket by ACTUAL leaf width (533/610/686/762/838…). Two variants: one counts
+    // leaves (for the door line), one counts frames (for the lining line).
+    function mxLeafWidthQty(objs){ var w={}; objs.forEach(function(o){ var k=o._leafWidth||'838'; w[k]=(w[k]||0)+mxLeafQty(o); }); return w; }
+    function mxFrameWidthQty(objs){ var w={}; objs.forEach(function(o){ var k=o._leafWidth||'838'; w[k]=(w[k]||0)+mxFrameQty(o); }); return w; }
+    // Emit one take-off line per distinct width present, widest first.
+    function mxPushWidthLines(wmap, item, note, unitWord){
       Object.keys(wmap).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);}).forEach(function(lw){
-        if(wmap[lw]>0) mats.push({cat:'Second Fix Joinery',item:item+' \u2014 '+lw+'mm',qty:Math.ceil(wmap[lw]),unit:'nr',note:note,basis:wmap[lw]+' door leaves ('+lw+'mm)'});
+        if(wmap[lw]>0) mats.push({cat:'Second Fix Joinery',item:item+' \u2014 '+lw+'mm',qty:Math.ceil(wmap[lw]),unit:'nr',note:note,basis:wmap[lw]+' '+(unitWord||'door leaves')+' ('+lw+'mm)'});
       });
     }
 
-    // Lining set — every internal door needs one regardless of kind, and each door's
-    // own _leafWidth is real data (defaulted 838mm ground/762mm first, user-editable
-    // in the schedule), so this split is exact, not an estimate.
-    mxPushWidthLines(mxWidthQty(internalDoors), 'Internal door lining set sw', '32x115mm head + 2 legs per door leaf');
+    // Lining set — ONE frame per opening (a double door is one wider frame, not two).
+    mxPushWidthLines(mxFrameWidthQty(internalDoors), 'Internal door lining set sw', 'One frame per opening (double = one wider frame)', 'frames');
 
     // Fire doors (FD30) — flagged in the schedule notes (e.g. integral-garage door)
     var fireDoors=internalDoors.filter(function(o){return o.fireDoor;}).reduce(function(a,o){return a+(o.qty||1);},0);
@@ -977,10 +977,10 @@ function mxiCalc(m){
     var stdW;
     if(bLoc>0){
       var standardObjs=nonFireObjs.filter(function(o){ return bathroomObjs.indexOf(o)===-1; });
-      stdW=mxWidthQty(standardObjs);
+      stdW=mxLeafWidthQty(standardObjs);
     } else {
       // Distribute the estimated standard count across the observed width mix.
-      var allW=mxWidthQty(nonFireObjs); var totalW=0; Object.keys(allW).forEach(function(k){totalW+=allW[k];});
+      var allW=mxLeafWidthQty(nonFireObjs); var totalW=0; Object.keys(allW).forEach(function(k){totalW+=allW[k];});
       stdW={}; var assigned=0; var wkeys=Object.keys(allW).sort(function(a,b){return parseInt(b,10)-parseInt(a,10);});
       wkeys.forEach(function(k,ix){
         if(ix===wkeys.length-1){ stdW[k]=standardDoors-assigned; }
@@ -998,7 +998,7 @@ function mxiCalc(m){
       // Only split the bathroom leaf by width when it's backed by real objects (bLoc>0)
       // — an estimated count has no specific doors to attribute a width to.
       if(bLoc>0){
-        mxPushWidthLines(mxWidthQty(bathroomObjs), 'Internal door 40mm solid core (bathroom)', 'Solid core for privacy');
+        mxPushWidthLines(mxLeafWidthQty(bathroomObjs), 'Internal door 40mm solid core (bathroom)', 'Solid core for privacy');
       } else {
         mats.push({cat:'Second Fix Joinery',item:'Internal door 40mm solid core (bathroom)',qty:Math.ceil(bathroomDoors),unit:'nr',note:'Solid core for privacy \u2014 width not split, count is estimated',basis:bathBasis});
       }
