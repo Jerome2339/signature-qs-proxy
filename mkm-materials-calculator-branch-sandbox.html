@@ -1293,7 +1293,15 @@ function renderScheduleBuilder(){
     var rowClass=r.suspect?'sched-row-flagged':((!r.complete||r.suggested)?'sched-row-incomplete':'');
     var refCell='<input type="text" class="sched-inline-input sched-ref-input" data-idx="'+i+'" value="'+(r.ref||'').replace(/"/g,'&quot;')+'"/>';
     var confirmBtn=r.suspect?'<button type="button" class="sched-confirm-real" data-confirmreal="'+i+'" title="Confirm this is a real opening">\u2713</button>':'';
-    var typeOpts=['door','window','bifold'].map(function(t){return '<option value="'+t+'"'+(r.type===t?' selected':'')+'>'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>';}).join('');
+    // Type dropdown: 'internal_door' is a UI-only value that maps to type=door +
+    // external=false. It shows as selected when the row is currently a non-external
+    // door (so a mislabelled bifold reclassified to internal reads back correctly).
+    var isInternalDoor = (r.type==='door' && !r.external);
+    var typeChoices=[['door','External Door'],['internal_door','Internal Door'],['window','Window'],['bifold','Bifold']];
+    var typeOpts=typeChoices.map(function(t){
+      var sel = (t[0]==='internal_door') ? isInternalDoor : (r.type===t[0] && !(t[0]==='door' && !r.external));
+      return '<option value="'+t[0]+'"'+(sel?' selected':'')+'>'+t[1]+'</option>';
+    }).join('');
     var typeCell='<select class="sched-inline-select sched-type-select" data-idx="'+i+'">'+typeOpts+'</select>';
     var locCell='<input type="text" class="sched-inline-input sched-loc-input" data-idx="'+i+'" value="'+(r.location||'').replace(/"/g,'&quot;')+'" placeholder="location"/>';
     var wCell, hCell;
@@ -1388,8 +1396,10 @@ function wireScheduleBuilder(){
   });
   document.querySelectorAll('#schedTbody .sched-type-select').forEach(function(sel){
     sel.addEventListener('change', function(){
-      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx];
-      row.o.type=this.value;
+      var idx=parseInt(this.getAttribute('data-idx'),10), row=mxSchedRows[idx], v=this.value;
+      if(v==='internal_door'){ row.o.type='door'; row.o.external=false; }
+      else if(v==='door'){ row.o.type='door'; row.o.external=true; }   // "External Door"
+      else { row.o.type=v; row.o.external=true; }                       // window / bifold are external
       row.o._dupSuspect=false; row.o._heightSuspect=false;  // reclassifying is the correction
       renderScheduleBuilder();
     });
@@ -1780,9 +1790,9 @@ function wdType(o){
 }
 function wdIsExternal(o){
   if(wdIsMeterBox(o)) return false;                     // meter box is not an external door — structural fact, not a suspicion
+  if(typeof o.external==='boolean') return o.external;  // explicit flag wins — incl. user reclassification in the schedule
   var ty=wdType(o);
-  if(ty==='window'||ty==='bifold') return true;        // glazing & bifolds always belong here
-  if(typeof o.external==='boolean') return o.external;  // vector-supplied flag wins (height>=2100, notes, garage)
+  if(ty==='window'||ty==='bifold') return true;        // glazing & bifolds default external
   // Schedule prefix is authoritative: EO = External Openings, io = internal openings.
   var lbl=(o.label||'').trim();
   if(/^\s*EO[\s\d]/i.test(lbl)) return true;
