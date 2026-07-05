@@ -309,8 +309,13 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
 
   // Sandbox trial cap — hard total limit on the evaluation deployment.
+  // Counts CONFIRMED TAKE-OFFS (usage_log), NOT raw extraction attempts (cost_log).
+  // cost_log inflates with retries and abandoned/gated runs — a single delivered
+  // take-off can trigger 2-3 analyse calls — so counting it would exhaust the trial
+  // far faster than the user's real usage. usage_log is written only when a take-off
+  // is actually rendered/billed (see /log-usage), so it matches "estimates delivered".
   if (SANDBOX_MODE) {
-    const total = await supabaseTotalCount('cost_log').catch(() => 0);
+    const total = await supabaseTotalCount('usage_log').catch(() => 0);
     if (total >= SANDBOX_TOTAL_CAP) {
       return res.status(429).json({ error: 'sandbox_limit', message: `This sandbox has reached its trial limit of ${SANDBOX_TOTAL_CAP} estimates. Please contact Signature to extend the trial.` });
     }
@@ -320,7 +325,9 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
   const reqBranch = (req.body && req.body.branch) || '';
   const reqClient = (req.body && req.body.client) || '';
   if (BRANCH_MONTHLY_CAP > 0 && reqBranch) {
-    const used = await supabaseMonthCount(reqClient, reqBranch, 'cost_log').catch(() => 0);
+    // Count confirmed take-offs (usage_log), not raw attempts (cost_log) — see note on
+    // the sandbox cap above. A branch's "monthly estimates" = take-offs delivered.
+    const used = await supabaseMonthCount(reqClient, reqBranch, 'usage_log').catch(() => 0);
     if (used >= BRANCH_MONTHLY_CAP) {
       console.warn(`Branch ${reqBranch} hit monthly cap (${used}/${BRANCH_MONTHLY_CAP})`);
       return res.status(429).json({ error: 'monthly_limit', message: `This branch has reached its monthly limit of ${BRANCH_MONTHLY_CAP} estimates. Please contact your administrator.` });
