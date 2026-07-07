@@ -610,9 +610,28 @@ function mergeDocAIResults(results) {
   };
   const getStr = (key) => allEntities[key]?.value || null;
 
-  const groundArea = getNum('floor_area_ground_m2');
-  const firstArea = getNum('floor_area_first_m2');
+  const rawGroundArea = getNum('floor_area_ground_m2');
+  const rawFirstArea = getNum('floor_area_first_m2');
   const totalArea = getNum('floor_area_total_m2');
+  // FLOOR-AREA SPLIT SANITY CHECK — some drawing sets (e.g. Ingreen/Brierley's Kirkby
+  // Malzeard site — confirmed on Whorlton and Spaunton) show only a single combined GIFA
+  // total in the title block ("4B/7P 116m2 (GIFA)"), with no ground/first breakdown at
+  // all — unlike drawings that do give an explicit per-floor split (RDC's, Align Property
+  // Partners'). DocAI's floor_area_ground_m2/first_m2 entities have no "not found" state:
+  // when there's genuinely no split to read, it has been observed to read the combined
+  // total straight into ground_m2 and fabricate an implausible first_m2 (17.5m² against
+  // a 116m² "ground" reading, at 0.9999 confidence) rather than leaving it null. Detect
+  // this pattern — no separate total found, and first far too small for a real 2-storey
+  // split (a genuine first floor is rarely below ~50% of ground) — and treat the ground
+  // reading as the likely combined total, splitting it evenly rather than trusting the
+  // fabricated split. Flagged for the surveyor, not silently substituted.
+  let floorSplitSuspect = false;
+  let groundArea = rawGroundArea, firstArea = rawFirstArea;
+  if (!totalArea && rawGroundArea && rawFirstArea && rawFirstArea < rawGroundArea * 0.5) {
+    floorSplitSuspect = true;
+    groundArea = rawGroundArea / 2;
+    firstArea = rawGroundArea / 2;
+  }
   const lengthMm = getNum('overall_length_mm');
   const rawWidthMm = getNum('overall_width_mm');
   // WIDTH SANITY CHECK — the extractor sometimes tags the ROOF SPAN as the building
@@ -670,6 +689,7 @@ function mergeDocAIResults(results) {
   if (!widthMm) missing.push('Overall building width — enter manually in Dimensions tab');
   if (widthSuspect) missing.push('⚠ Building width (' + (widthMm/1000).toFixed(3) + 'm) may be the ROOF SPAN, not the footprint width — it looks too large for the floor area. CONFIRM the side dimension from the substructure/ground-floor plan outer bar and correct in the Dimensions tab before relying on masonry quantities.');
   if (heightSuspect) missing.push('⚠ Wall height (' + (extWallHeightMm/1000).toFixed(3) + 'm) may be the RIDGE or COPING APEX height, not EAVES — it looks too tall for a ' + storeysForHeight + '-storey building. CONFIRM the eaves height from the elevation and correct in the Dimensions tab before relying on wall/gable/skirting/soffit quantities.');
+  if (floorSplitSuspect) missing.push('⚠ Ground/first floor split (' + rawGroundArea + 'm² / ' + rawFirstArea + 'm² read) looks fabricated — this drawing may only show a single combined GIFA total with no per-floor breakdown. Assumed an even 50/50 split (' + groundArea.toFixed(1) + 'm² each) — CONFIRM the actual ground/first areas from the drawing and correct in the Dimensions tab before relying on partition area, skirting, or storey-count-dependent quantities.');
   if (!roofPitch) missing.push('Roof pitch angle — enter manually in Spec & Roof tab');
 
   const notes = [];
