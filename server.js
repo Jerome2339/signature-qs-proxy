@@ -1002,6 +1002,28 @@ FLOOR PLANS — for reference codes, locations, and a count cross-check:
 - Door swing arcs confirm doors and give an approximate width (the arc chord).
 - The opening count on the plans should roughly match the elevation count — use it to catch any you missed.
 
+INTERNAL DOORS WITH NO INTERNAL OPENINGS SCHEDULE (IMPORTANT — this is a separate path from
+the elevation-based one above): internal doors NEVER appear on an elevation, only on floor
+plans, so if there is no internal door schedule table, the elevation/section method above
+cannot find them and must not be relied on for internal doors — it will silently return zero.
+When this happens:
+- Read the FLOOR PLANS (ground and first) directly and count every internal door swing symbol
+  — a door leaf line with a quarter-circle swing arc, between two internal rooms, or between a
+  room and a hall/landing. This is a primary extraction path here, not just a cross-check.
+- Width: use the swing arc's radius (the straight leaf line from hinge to the arc) as the door
+  leaf width in mm, scaled against a nearby printed dimension on the same plan. If a reference
+  code (D01, IDG.1 etc) sits next to the door, use it for the label; if not, label sequentially
+  (e.g. "Bed 1", "Bathroom") by the room it opens into.
+- Height: internal doors are essentially never dimensioned on plan. Use a standard UK internal
+  door height of 1981mm leaf / 2035mm structural opening unless a section or detail on the same
+  drawing set gives a different figure — do not return null for height just because the plan
+  doesn't show it; a reasonable standard default is far better than a missing internal door.
+- Count every room-to-room and room-to-corridor door you can see a swing for — do not stop at
+  the count implied by any external door schedule, and do not return an empty/zero internal
+  door list just because there is no schedule table for them. A typical 3-4 bed house has
+  10-16 internal doors; if your count comes back at 0 or well below that, re-check the floor
+  plans before finalising.
+
 Combine them: WIDTH from the elevation, HEIGHT from the section, REF and LOCATION from the plan. Label W01, W02... for windows and D01, D02... for doors in the order found, and set source to "elevation".
 
 STEP 3 — ROOM SCHEDULE (IMPORTANT):
