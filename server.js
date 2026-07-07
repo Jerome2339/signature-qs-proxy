@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.18.3', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.19.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -520,8 +520,36 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
           console.log(`Floor-plan read did not yield a usable width (got ${gfW||'null'}) — keeping flag for manual confirmation.`);
         }
       }
+
+      // ── ROUTE D — eaves-height correction (runs alongside Route C, before _geom is
+      // stripped). Fires only when overall_height_mm looks implausible for the declared
+      // storey count (i.e. it looks like RIDGE or COPING APEX, not EAVES — see the
+      // heightSuspect note in mergeDocAIResults). Reads the width off merged.floor in
+      // case Route C already corrected it, so the two corrections compose correctly.
+      if (G && G.heightSuspect && ANTHROPIC_KEY && req.files && req.files.length) {
+        console.log(`Wall height ${G.extWallHeightMm}mm failed ${G.storeysForHeight}-storey eaves sanity — firing elevation eaves-height read…`);
+        const eh = await readEavesHeight(req.files);
+        const eavesMm = eh && eh.eaves_height_mm ? parseFloat(eh.eaves_height_mm) : null;
+        const plausibleH = eavesMm && eavesMm > 2000 && eavesMm < 6500;
+        if (plausibleH) {
+          const currentLengthMm = merged.floor.length_m ? Math.round(merged.floor.length_m * 1000) : G.lengthMm;
+          const currentWidthMm = merged.floor.width_m ? Math.round(merged.floor.width_m * 1000) : G.widthMm;
+          const newGeom2 = computeWallGeometry({ ...G, lengthMm: currentLengthMm, widthMm: currentWidthMm, extWallHeightMm: eavesMm });
+          merged.floor.ext_wall_height_m = eavesMm / 1000;
+          merged.walls = newGeom2.walls;
+          merged.missing = (merged.missing || []).filter(x => !/RIDGE or COPING APEX/.test(x));
+          merged.notes = merged.notes || [];
+          merged.notes.push(`Wall height corrected to ${(eavesMm/1000).toFixed(3)}m from the elevation's EAVES read (extracted ${(G.extWallHeightMm/1000).toFixed(3)}m looked like a ridge/coping-apex height).`);
+          merged.extra = merged.extra || {};
+          merged.extra.height_correction = { from_mm: G.extWallHeightMm, to_mm: eavesMm, ridge_read_mm: eh.ridge_height_mm || null, source_note: eh.source_note || null };
+          console.log(`Wall height corrected: ${G.extWallHeightMm} → ${eavesMm} mm (elevation EAVES read; ridge read as ${eh.ridge_height_mm || '?'})`);
+        } else {
+          console.log(`Eaves-height read did not yield a usable value (got ${eavesMm||'null'}) — keeping flag for manual confirmation.`);
+        }
+      }
+
       if (merged._geom) delete merged._geom; // keep response payload clean
-    } catch (e) { console.warn('Width correction skipped (non-critical):', e.message); }
+    } catch (e) { console.warn('Width/height correction skipped (non-critical):', e.message); }
 
     // Cost tracking (non-fatal): record what this lookup actually cost to run.
     try {
@@ -609,6 +637,21 @@ function mergeDocAIResults(results) {
   const extWallHeightMm = overallHeightMm || 
     (ceilGroundMm && ceilFirstMm ? ceilGroundMm + ceilFirstMm + 300 : // +300mm for floor structure
      ceilGroundMm ? ceilGroundMm : 2400);
+  // HEIGHT SANITY CHECK — the "overall_height_mm" entity is meant to be the EAVES
+  // height (DPC to wall-plate), but elevations often carry several height callouts
+  // close together (EAVES, RIDGE, COPING APEX, top-of-chimney), and the extractor can
+  // lock onto the tallest one on the sheet rather than the one actually labelled EAVES.
+  // Confirmed on two live houses: Meynell returned RIDGE 7463mm instead of EAVES
+  // 5115mm; Mortain returned COPING APEX 8531mm instead of EAVES 5390mm — both inflated
+  // every wall/gable/skirting/soffit quantity downstream by 45-60%+. Cross-check against
+  // the declared storey count (from floor areas) the same way widthSuspect cross-checks
+  // against GIFA — plausible eaves height is roughly 4.6-5.8m for 2-storey, 2.3-3.0m for
+  // 1-storey; give generous headroom either side before flagging.
+  const storeysForHeight = (firstArea && firstArea > 5) ? 2 : 1;
+  const plausibleMaxEavesMm = storeysForHeight === 2 ? 6300 : 3300;
+  let heightSuspect = false;
+  if (extWallHeightMm && extWallHeightMm > plausibleMaxEavesMm) heightSuspect = true;
+
 
   const sideRunMm = getNum('side_wall_length_mm') || getNum('gable_wall_length_mm');
   const wallBuildupMm = (getNum('wall_outer_leaf_mm') || 102) + (getNum('wall_cavity_mm') || 100) + (getNum('wall_inner_leaf_mm') || 100);
@@ -626,6 +669,7 @@ function mergeDocAIResults(results) {
   if (!lengthMm) missing.push('Overall building length — enter manually in Dimensions tab');
   if (!widthMm) missing.push('Overall building width — enter manually in Dimensions tab');
   if (widthSuspect) missing.push('⚠ Building width (' + (widthMm/1000).toFixed(3) + 'm) may be the ROOF SPAN, not the footprint width — it looks too large for the floor area. CONFIRM the side dimension from the substructure/ground-floor plan outer bar and correct in the Dimensions tab before relying on masonry quantities.');
+  if (heightSuspect) missing.push('⚠ Wall height (' + (extWallHeightMm/1000).toFixed(3) + 'm) may be the RIDGE or COPING APEX height, not EAVES — it looks too tall for a ' + storeysForHeight + '-storey building. CONFIRM the eaves height from the elevation and correct in the Dimensions tab before relying on wall/gable/skirting/soffit quantities.');
   if (!roofPitch) missing.push('Roof pitch angle — enter manually in Spec & Roof tab');
 
   const notes = [];
@@ -638,7 +682,7 @@ function mergeDocAIResults(results) {
     drawing_type: ['floor plan', 'elevation', 'section', 'schedule'],
     // Route C: geometry inputs, so the handler can recompute walls if the width is
     // corrected from a floor-plan read. Stripped from the response before sending.
-    _geom: { lengthMm, widthMm, extWallHeightMm, pitchDeg, wallBuildupMm, sideRunMm, widthSuspect, groundArea: gifaForWidth },
+    _geom: { lengthMm, widthMm, extWallHeightMm, pitchDeg, wallBuildupMm, sideRunMm, widthSuspect, heightSuspect, storeysForHeight, groundArea: gifaForWidth },
 
     floor: {
       length_m: lengthMm ? lengthMm / 1000 : null,
@@ -762,6 +806,41 @@ Return ONLY this JSON, no markdown, no commentary:
     return JSON.parse(raw.slice(s, e + 1));
   } catch (err) {
     console.warn('Floor-plan dimension read failed (non-critical):', err.message);
+    return null;
+  }
+}
+
+// ROUTE D — targeted eaves-height read. Only fired when overall_height_mm looks
+// implausible for the declared storey count (i.e. it looks like RIDGE or COPING APEX
+// height, not EAVES — see heightSuspect in mergeDocAIResults). Reads ONLY the eaves
+// height off the ELEVATIONS via a focused Claude vision call. Cheap, and only fires
+// on suspect drawings, same pattern as readFloorPlanDimensions (Route C).
+async function readEavesHeight(files) {
+  if (!ANTHROPIC_KEY || !files || !files.length) return null;
+  const fileParts = files.map(file => {
+    const b64 = file.buffer.toString('base64');
+    const ext = (file.originalname || '').split('.').pop().toLowerCase();
+    const isPDF = (file.mimetype || '').includes('pdf') || ext === 'pdf';
+    if (isPDF) return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } };
+    return { type: 'image', source: { type: 'base64', media_type: file.mimetype, data: b64 } };
+  });
+  fileParts.push({ type: 'text', text: `You are a senior UK quantity surveyor. Read ONLY the building's EAVES height from the ELEVATION drawings.
+Rules:
+- The eaves height is the vertical dimension from the ground-floor datum (GFFL / DPC / 0000) up to the EAVES line — where the top of the external wall meets the roof (top of wall plate). It is usually printed as a level callout, e.g. "EAVES +5115".
+- Do NOT return the RIDGE height, the COPING APEX height, or the top-of-chimney-stack height. Those sit further up the same elevation and are taller than the eaves — do not confuse them with EAVES just because they are the largest number near the roof.
+- Also return whatever RIDGE height (or Coping Apex, if that is what is printed instead of a ridge) you find on the same elevation, in ridge_height_mm, as a cross-check — it should be noticeably taller than the eaves height.
+- If several elevations show slightly different eaves callouts (e.g. because of a porch, abutment, or half-landing), use the eaves height on the FRONT elevation, or whichever value appears on most elevations.
+- Read exactly as printed, in millimetres. Do not scale or estimate. If genuinely unreadable or not labelled EAVES specifically, return null rather than guessing.
+Return ONLY this JSON, no markdown, no commentary:
+{"eaves_height_mm":null,"ridge_height_mm":null,"source_note":null}` });
+  try {
+    const raw = (await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 500, messages: [{ role: 'user', content: fileParts }] }))
+      .replace(/```json|```/g, '').trim();
+    const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
+    if (s < 0 || e <= s) return null;
+    return JSON.parse(raw.slice(s, e + 1));
+  } catch (err) {
+    console.warn('Eaves-height read failed (non-critical):', err.message);
     return null;
   }
 }
