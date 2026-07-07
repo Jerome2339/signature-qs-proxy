@@ -487,37 +487,68 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
       }
     }
 
-    // ── ROUTE C — width correction (runs on EVERY path, vector or raster) ──────
+    // ── ROUTE C — width/length correction (runs on EVERY path, vector or raster) ──
     // The width sometimes comes through as the roof span (e.g. 8323) not the footprint
-    // width (e.g. 6565). If it failed the GIFA sanity check, fire a focused floor-plan
-    // read to get the true width, validate it, and recompute the wall geometry. Only
-    // fires when suspect — clean drawings stay on the free path.
+    // width (e.g. 6565) — widthSuspect. Separately, DocAI can simply fail to return an
+    // overall_length_mm (or overall_width_mm) entity at all on a given run — confirmed
+    // on Whorlton, where a missing length silently produced an EMPTY walls array with
+    // no wall/envelope/masonry/skirting quantities at all, not just a wrong number.
+    // That's a worse failure than a bad value: the existing floor-plan dimension read
+    // already captures BOTH length (gfL) and width (gfW) from the plan, but previously
+    // only gfW was ever applied — gfL was fetched and silently discarded. Fire this read
+    // whenever EITHER dimension is missing outright, in addition to the existing
+    // widthSuspect case, and apply whichever of length/width actually needs filling in.
     try {
       const G = merged._geom;
-      if (G && G.widthSuspect && ANTHROPIC_KEY && req.files && req.files.length) {
-        console.log(`Width ${G.widthMm}mm failed GIFA sanity — firing floor-plan dimension read…`);
+      const missingDims = G && (!G.lengthMm || !G.widthMm);
+      if (G && (G.widthSuspect || missingDims) && ANTHROPIC_KEY && req.files && req.files.length) {
+        console.log(G.widthSuspect
+          ? `Width ${G.widthMm}mm failed GIFA sanity — firing floor-plan dimension read…`
+          : `Length/width missing (L=${G.lengthMm}, W=${G.widthMm}) — firing floor-plan dimension read…`);
         const fp = await readFloorPlanDimensions(req.files);
         const gfW = fp && fp.ground_floor_width_mm ? parseFloat(fp.ground_floor_width_mm) : null;
         const gfL = fp && fp.ground_floor_length_mm ? parseFloat(fp.ground_floor_length_mm) : null;
         const ffW = fp && fp.first_floor_width_mm ? parseFloat(fp.first_floor_width_mm) : null;
         // accept the floor-plan width only if it is plausible against GIFA (i.e. it is
-        // NOT itself the span). Same threshold used to flag it suspect.
+        // NOT itself the span). Same threshold used to flag it suspect. Length has no
+        // GIFA-implied ceiling to check against, so just a basic sanity floor.
         const impliedExtW = G.groundArea && G.lengthMm ? (G.groundArea / (G.lengthMm / 1000)) * 1000 + 600 : null;
-        const plausible = gfW && gfW > 2000 && (!impliedExtW || gfW <= impliedExtW + 1500);
-        if (plausible) {
-          const newGeom = computeWallGeometry({ ...G, widthMm: gfW });
-          merged.floor.width_m = gfW / 1000;
+        const widthPlausible = gfW && gfW > 2000 && (!impliedExtW || gfW <= impliedExtW + 1500);
+        const lengthPlausible = gfL && gfL > 2000;
+        // Only overwrite a dimension if the read is plausible AND (it was missing/null
+        // to begin with, OR the width-specific suspect check flagged it) — never let an
+        // implausible read clobber a perfectly good existing value.
+        const useLength = lengthPlausible && !G.lengthMm;
+        // If length was just recovered, the ORIGINAL widthSuspect check never had a
+        // chance to run (it needs a length to compare against) — re-run the same
+        // GIFA-implied-width logic now that a real length is known, so a width that
+        // was silently WRONG (not just silently missing) still gets caught. Confirmed
+        // case: DocAI returned the LENGTH value into the WIDTH field (both 9102) while
+        // length itself came back empty — the plan's real width was 8315.
+        const impliedExtWWithNewLength = G.groundArea && useLength && gfL ? (G.groundArea / (gfL / 1000)) * 1000 + 600 : null;
+        const widthSuspectAfterLengthFix = !!(useLength && G.widthMm && impliedExtWWithNewLength && G.widthMm > impliedExtWWithNewLength + 1500);
+        const useWidth = widthPlausible && (!G.widthMm || G.widthSuspect || widthSuspectAfterLengthFix);
+        if (useWidth || useLength) {
+          const newLengthMm = useLength ? gfL : G.lengthMm;
+          const newWidthMm = useWidth ? gfW : G.widthMm;
+          const newGeom = computeWallGeometry({ ...G, lengthMm: newLengthMm, widthMm: newWidthMm });
+          merged.floor.length_m = newLengthMm ? newLengthMm / 1000 : merged.floor.length_m;
+          merged.floor.width_m = newWidthMm ? newWidthMm / 1000 : merged.floor.width_m;
           merged.walls = newGeom.walls;
-          merged.roof.span_m = gfW / 1000;
+          if (useWidth) merged.roof.span_m = newWidthMm / 1000;
+          if (useLength) merged.roof.length_m = newLengthMm / 1000;
           merged.missing = (merged.missing || []).filter(x => !/may be the ROOF SPAN/.test(x));
+          if (useLength) merged.missing = (merged.missing || []).filter(x => !/Overall building length/.test(x));
+          if (useWidth && !G.widthSuspect) merged.missing = (merged.missing || []).filter(x => !/Overall building width/.test(x));
           merged.notes = merged.notes || [];
-          merged.notes.push(`Building width corrected to ${(gfW/1000).toFixed(3)}m from the floor-plan read (extracted ${(G.widthMm/1000).toFixed(3)}m looked like the roof span).`);
+          if (useWidth) merged.notes.push(`Building width corrected to ${(newWidthMm/1000).toFixed(3)}m from the floor-plan read (extracted ${G.widthMm ? (G.widthMm/1000).toFixed(3)+'m looked like the roof span' : 'was missing'}).`);
+          if (useLength) merged.notes.push(`Building length filled in from the floor-plan read (${(newLengthMm/1000).toFixed(3)}m) — DocAI did not return an overall_length_mm value this run.`);
           merged.extra = merged.extra || {};
-          merged.extra.width_correction = { from_mm: G.widthMm, to_mm: gfW, ground_first: { gfL, gfW, ffW }, source_note: fp.source_note || null };
-          if (ffW && Math.abs(ffW - gfW) > 150) merged.notes.push(`First-floor width (${ffW}) differs from ground (${gfW}) — likely a bay/projection; ground floor governs the footprint.`);
-          console.log(`Width corrected: ${G.widthMm} → ${gfW} mm (floor-plan read; GF ${gfL}x${gfW}, FF width ${ffW||'?'})`);
+          merged.extra.width_correction = { from_mm: G.widthMm, to_mm: newWidthMm, ground_first: { gfL, gfW, ffW }, source_note: fp.source_note || null };
+          if (ffW && gfW && Math.abs(ffW - gfW) > 150) merged.notes.push(`First-floor width (${ffW}) differs from ground (${gfW}) — likely a bay/projection; ground floor governs the footprint.`);
+          console.log(`Dimensions corrected: L ${G.lengthMm}→${newLengthMm}mm, W ${G.widthMm}→${newWidthMm}mm (floor-plan read; GF ${gfL}x${gfW}, FF width ${ffW||'?'})`);
         } else {
-          console.log(`Floor-plan read did not yield a usable width (got ${gfW||'null'}) — keeping flag for manual confirmation.`);
+          console.log(`Floor-plan read did not yield usable dimensions (L=${gfL||'null'}, W=${gfW||'null'}) — keeping flags for manual confirmation.`);
         }
       }
 
@@ -548,6 +579,15 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         }
       }
 
+      // FINAL CHECK — if walls is still empty after both correction attempts above,
+      // every wall/envelope/masonry/skirting/soffit/fascia/gutter quantity in this
+      // take-off is silently zero, not just one missing dimension. A generic "building
+      // length missing" line is easy to skim past without realising the consequence is
+      // total, not partial — so say that plainly rather than leaving it implied.
+      if (merged.walls && merged.walls.length === 0) {
+        merged.missing = merged.missing || [];
+        merged.missing.unshift('⚠ NO WALL GEOMETRY COULD BE BUILT — building length and/or width could not be read even after a floor-plan re-check. Every wall, envelope, masonry, skirting, soffit, fascia and gutter quantity in this take-off is zero as a result, not just a missing field. Enter the dimensions manually in the Dimensions tab before relying on any external quantities here.');
+      }
       if (merged._geom) delete merged._geom; // keep response payload clean
     } catch (e) { console.warn('Width/height correction skipped (non-critical):', e.message); }
 
