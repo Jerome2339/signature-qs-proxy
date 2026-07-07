@@ -345,6 +345,13 @@ const analyseBtn = document.getElementById('analyseBtn');
 const branchNo = document.getElementById('branchNo');
 const branchHint = document.getElementById('branchHint');
 
+// Internal-only diagnostic view (Signature/QS use, never surfaced to MKM branch users).
+// Off unless the URL is explicitly opened with ?qsdebug=1 — nothing in the UI reveals
+// or toggles this, so a branch user has no path to discover or enable it by clicking
+// around. Shows each material line's calculation breakdown (the 'basis' field, already
+// computed on every line but otherwise discarded — see mats.push calls throughout).
+const QS_DEBUG = new URLSearchParams(location.search).get('qsdebug') === '1';
+
 // Pre-fill & lock the branch from a per-branch link, e.g. ?branch=1042
 (function(){
   const b = new URLSearchParams(location.search).get('branch');
@@ -1124,7 +1131,25 @@ function buildModel(parsed, projName, clientName){
     if((!_docL||_fpAuth)&&_fpL>0) m.floor.L=Math.round(_fpL/10)/100;
     if((!_docW||_fpAuth)&&_fpW>0) m.floor.W=Math.round(_fpW/10)/100;
   }
-  if(parsed.walls&&parsed.walls.length>0){var extH=parsed.floor&&parsed.floor.ext_wall_height_m?parsed.floor.ext_wall_height_m:(m.ceilingH||2.4);m.walls=parsed.walls.filter(function(w){return w.length_m&&w.length_m>0;}).map(function(w){return{label:w.label||'Wall',L:Math.round(w.length_m*1000)/1000,H:w.height_m||extH,ext:w.is_external!==false,gable_area_m2:w.gable_area_m2||0};});}
+  if(parsed.walls&&parsed.walls.length>0){
+    var extH=parsed.floor&&parsed.floor.ext_wall_height_m?parsed.floor.ext_wall_height_m:(m.ceilingH||2.4);
+    // SANITY CHECK: ext_wall_height_m should be the EAVES height. Elevations often carry
+    // several height annotations close together (RIDGE, COPING APEX, top-of-chimney, EAVES),
+    // and the extractor can lock onto the tallest one on the drawing rather than the one
+    // actually labelled EAVES (confirmed on Meynell \u2014 RIDGE 7463mm used instead of EAVES
+    // 5115mm \u2014 and Mortain \u2014 COPING APEX 8531mm used instead of EAVES 5390mm; both
+    // inflated wall area, gables, skirting run and soffit/fascia/gutter together by 45-60%+).
+    // This never silently corrects the number \u2014 it only flags it, same as the floor-area /
+    // opening self-checks elsewhere in this function \u2014 so it's verified against the
+    // elevation before ordering rather than trusted blind.
+    var _faChkH=(parsed.extra&&parsed.extra.floor_areas)||{};
+    var _storeysH=(_faChkH.first_m2&&_faChkH.first_m2>5)?2:1;
+    var _plausibleMaxEaves=_storeysH===2?6.3:3.3;
+    if(extH>_plausibleMaxEaves){
+      m._wallHeightNote='Wall height ('+extH.toFixed(2)+'m) looks too tall for a '+_storeysH+'-storey eaves line \u2014 the extractor may have read RIDGE/coping-apex height instead of EAVES height. Verify against the elevation before ordering (this inflates wall area, gables, skirting run and soffit/fascia/gutter together).';
+    }
+    m.walls=parsed.walls.filter(function(w){return w.length_m&&w.length_m>0;}).map(function(w){return{label:w.label||'Wall',L:Math.round(w.length_m*1000)/1000,H:w.height_m||extH,ext:w.is_external!==false,gable_area_m2:w.gable_area_m2||0};});
+  }
   else if(parsed.floor&&parsed.floor.length_m&&parsed.floor.width_m){var L=parsed.floor.length_m,W2=parsed.floor.width_m,H=m.ceilingH||2.4;m.walls=[{label:'Front wall',L:L,H:H,ext:true},{label:'Rear wall',L:L,H:H,ext:true},{label:'Left wall',L:W2,H:H,ext:true},{label:'Right wall',L:W2,H:H,ext:true}];}
   var op=[];
   // Keep EVERY opening the extractor found, even ones missing width and/or height —
@@ -1611,7 +1636,8 @@ function renderScheduleHTML(mats){
   return cats.map(function(cat){
     var rows=mats.filter(function(x){return x.cat===cat;}).map(function(x){
       var q=(typeof x.qty==='number')?x.qty.toLocaleString('en-GB'):x.qty;
-      return '<div class="sched-row"><span class="it">'+x.item+'</span><span class="qt">'+q+'</span><span class="un">'+x.unit+'</span></div>';
+      var basisLine = (QS_DEBUG && x.basis) ? '<div class="sched-basis" style="font-size:9px;color:#999;padding-left:2px">basis: '+x.basis+'</div>' : '';
+      return '<div class="sched-row"><span class="it">'+x.item+'</span><span class="qt">'+q+'</span><span class="un">'+x.unit+'</span></div>'+basisLine;
     }).join('');
     return '<div class="sched-cat"><div class="sched-cat-t">'+cat+'</div>'+rows+'</div>';
   }).join('');
@@ -1622,7 +1648,8 @@ function schedulePDF(){
   var rows=cats.map(function(cat){
     var body=lastMats.filter(function(x){return x.cat===cat;}).map(function(x){
       var q=(typeof x.qty==='number')?x.qty.toLocaleString('en-GB'):x.qty;
-      return '<tr><td style="padding:5px 8px">'+x.item+'</td><td style="padding:5px 8px;text-align:right">'+x.unit+'</td><td style="padding:5px 8px;text-align:right;font-weight:600">'+q+'</td><td style="padding:5px 8px;font-size:10px;color:#888">'+(x.note||'')+'</td></tr>';
+      var basisTxt = (QS_DEBUG && x.basis) ? ' <span style="color:#bbb">[basis: '+x.basis+']</span>' : '';
+      return '<tr><td style="padding:5px 8px">'+x.item+'</td><td style="padding:5px 8px;text-align:right">'+x.unit+'</td><td style="padding:5px 8px;text-align:right;font-weight:600">'+q+'</td><td style="padding:5px 8px;font-size:10px;color:#888">'+(x.note||'')+basisTxt+'</td></tr>';
     }).join('');
     return '<tr style="background:#f3f3f3"><td colspan="4" style="font-weight:700;font-size:10px;text-transform:uppercase;color:#555;padding:6px 8px">'+cat+'</td></tr>'+body;
   }).join('');
@@ -1704,6 +1731,7 @@ function renderScheduleAndPanel(data){
   var warnBits=[]; if(data&&data.missing&&data.missing.length)warnBits.push(data.missing.join('; '));
   if(lastModel&&lastModel._floorAreaNote)warnBits.push(lastModel._floorAreaNote);
   if(lastModel&&lastModel._floorAreaNote2)warnBits.push(lastModel._floorAreaNote2); if(lastModel&&lastModel._openingNote)warnBits.push(lastModel._openingNote);
+  if(lastModel&&lastModel._wallHeightNote)warnBits.push(lastModel._wallHeightNote);
   var warnHTML=warnBits.length?'<div class="sched-note">Review before ordering: '+warnBits.join(' · ')+'</div>':'';
   document.getElementById('resSchedule').innerHTML =
     internalWallPanelHTML()+
