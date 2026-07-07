@@ -945,13 +945,19 @@ function mxiCalc(m){
   var internalCount=internalDoors.reduce(function(a,o){return a+(o.qty||1);},0);
   var totalDoorWidth=internalDoors.reduce(function(t,o){return t+mxFN(o.W)*(o.qty||1);},0);
   // SKIRTING — ext wall internal face x storeys + internal partitions (both faces, factored)
-  // partition run = internal wall area / ceiling height; SK_COVER applies real both-face coverage
-  // (~0.65 of theoretical 2.0) net of kitchen/utility plinths, fitted storage & wall junctions.
-  // Calibrated to Middleham measured take-off (~140m). VALIDATE across house types in sweep.
+  // partition run = internal wall area / ceiling height; SK_COVER = full theoretical both-face
+  // coverage, no discount. Originally set to 1.3 (~0.65 of theoretical 2.0, discounted for
+  // kitchen/utility plinths, fitted storage & wall junctions) but that discount doesn't hold up
+  // against real data: solved from live qsdebug basis readings (skExtRun/skIntLen/doorWidth)
+  // against hand-measured Actual on two houses — Cottesbrooke needed exactly 2.0, Meynell needed
+  // 2.105 — both close to the undiscounted theoretical value. Recalibrated to 2.0 (2025-07).
+  // Was reading skirting -14% to -25% low across nearly every house type in the tracker before
+  // this change (Whorlton the one exception at -6.8%). VALIDATE across the remaining house types
+  // in the next full sweep to confirm this holds beyond these two.
   var skStoreys=(faFirst>0)?2:1;
   var skExtRun=perim*skStoreys;
   var skIntLen=(cH>0?intWallAreaTotal/cH:0);
-  var SK_COVER=1.3;
+  var SK_COVER=2.0;
   var skirtingRun=Math.max(0,skExtRun+(skIntLen*SK_COVER)-totalDoorWidth);
   mats.push({cat:'Second Fix Joinery',item:'Skirting board 18x119mm MDF ogee',qty:mxF2(skirtingRun*MXW),unit:'lin m',note:'Ext perimeter x'+skStoreys+' storeys + internal partitions (both faces, factored) less door openings, +10% waste',basis:skirtingRun.toFixed(1)+'m ('+Math.round(skExtRun)+' ext + '+Math.round(skIntLen*SK_COVER)+' int '+'less '+Math.round(totalDoorWidth)+' doors)'});
 
