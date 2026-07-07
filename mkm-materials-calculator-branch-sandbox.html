@@ -943,7 +943,21 @@ function mxiCalc(m){
   // priced in the external Windows & Doors package, NOT second-fix joinery.
   var internalDoors=m.openings.filter(function(o){ return wdType(o)!=='window' && !wdIsExternal(o) && !o._meterBox; });
   var internalCount=internalDoors.reduce(function(a,o){return a+(o.qty||1);},0);
-  var totalDoorWidth=internalDoors.reduce(function(t,o){return t+mxFN(o.W)*(o.qty||1);},0);
+  // Internal doors deliberately carry no .W by design (see mxAssembleOpeningSchedule:
+  // "the take-off only ever uses their count + kind... never W×H"). Width-dependent
+  // formulas below (skirting deduction, architrave run) must use the floor-aware
+  // _leafWidth default (762mm first / 838mm ground) instead of mxFN(o.W), which is
+  // legitimately 0 for these rows and was silently zeroing out the door deduction
+  // (found on Whorlton: skirting basis read "less 0 doors" despite 11 real internal
+  // doors — architrave already had a blunt flat-rate rescue for this same gap;
+  // this gives both the actual per-door width instead of a guessed flat rate).
+  function mxDoorWidthM(o){
+    var w=mxFN(o.W);
+    if(w>0) return w;
+    if(o._leafWidth) return (parseFloat(o._leafWidth)||838)/1000;
+    return 0.838; // raw fallback if _leafWidth genuinely never got set
+  }
+  var totalDoorWidth=internalDoors.reduce(function(t,o){return t+mxDoorWidthM(o)*(o.qty||1);},0);
   // SKIRTING — ext wall internal face x storeys + internal partitions (both faces, factored)
   // partition run = internal wall area / ceiling height; SK_COVER = full theoretical both-face
   // coverage, no discount. Originally set to 1.3 (~0.65 of theoretical 2.0, discounted for
@@ -962,9 +976,9 @@ function mxiCalc(m){
   mats.push({cat:'Second Fix Joinery',item:'Skirting board 18x119mm MDF ogee',qty:mxF2(skirtingRun*MXW),unit:'lin m',note:'Ext perimeter x'+skStoreys+' storeys + internal partitions (both faces, factored) less door openings, +10% waste',basis:skirtingRun.toFixed(1)+'m ('+Math.round(skExtRun)+' ext + '+Math.round(skIntLen*SK_COVER)+' int '+'less '+Math.round(totalDoorWidth)+' doors)'});
 
   var archRun=internalCount>0
-    ? internalDoors.reduce(function(t,o){return t+(mxFN(o.H)*2+mxFN(o.W))*2*(o.qty||1);},0)
+    ? internalDoors.reduce(function(t,o){return t+(mxFN(o.H)*2+mxDoorWidthM(o))*2*(o.qty||1);},0)
     : 0;
-  if(archRun===0&&internalCount>0) archRun=internalCount*6.2*2;
+  if(archRun===0&&internalCount>0) archRun=internalCount*6.2*2; // belt-and-braces only; mxDoorWidthM above should mean this never fires now
   if(archRun>0) mats.push({cat:'Second Fix Joinery',item:'Architrave 15x69mm MDF ogee',qty:mxF2(archRun*MXW),unit:'lin m',note:'Both sides all internal door openings +10%',basis:internalCount+' doors x2 sides'});
 
   if(internalCount>0){
