@@ -470,7 +470,19 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
           const notes = [];
           if (gW && fW && Math.abs(gW - fW) > 150) notes.push(`ground/first width differ (${gW} vs ${fW}) — likely bay/projection`);
           if (gL && fL && Math.abs(gL - fL) > 150) notes.push(`ground/first length differ (${gL} vs ${fL}) — likely bay/projection`);
-          if (gW && docaiW && Math.abs(gW - docaiW) > 300) notes.push(`floor-plan width (${gW}) disagrees with DocAI width (${docaiW}) — DocAI value may be the roof span; floor plan is authoritative`);
+          if (gW && docaiW && Math.abs(gW - docaiW) > 300) {
+            notes.push(`floor-plan width (${gW}) disagrees with DocAI width (${docaiW}) — DocAI value may be the roof span; floor plan is authoritative`);
+            // This cross-check catches cases the GIFA-based widthSuspect heuristic in
+            // mergeDocAIResults misses — confirmed on Spaunton, where DocAI's width
+            // (7474mm) was actually LOWER than the true floor-plan width (9215mm), and
+            // GIFA-consistency alone made the wrong smaller value look plausible (a
+            // non-rectangular house's GIFA is always less than its bounding-box area,
+            // so a too-small width can look MORE GIFA-consistent than the correct one).
+            // Feed this independent signal into Route C's trigger below, which does its
+            // own fresh floor-plan read to actually correct it, rather than trusting gW
+            // directly here.
+            if (merged._geom) merged._geom.widthSuspect = true;
+          }
           merged.extra.floorplan_dimensions_check = notes.length ? notes : ['floor-plan dimensions read; consistent'];
           console.log(`Floor-plan dimensions (inspection): GF ${gL}x${gW}, FF ${fL}x${fW} | ${notes.join(' | ')||'consistent'}`);
         }
