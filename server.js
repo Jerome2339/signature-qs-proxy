@@ -481,7 +481,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
             // Feed this independent signal into Route C's trigger below, which does its
             // own fresh floor-plan read to actually correct it, rather than trusting gW
             // directly here.
-            if (merged._geom) merged._geom.widthSuspect = true;
+            if (merged._geom) { merged._geom.widthSuspect = true; merged._geom.widthSuspectSource = 'crosscheck'; }
           }
           merged.extra.floorplan_dimensions_check = notes.length ? notes : ['floor-plan dimensions read; consistent'];
           console.log(`Floor-plan dimensions (inspection): GF ${gL}x${gW}, FF ${fL}x${fW} | ${notes.join(' | ')||'consistent'}`);
@@ -525,7 +525,17 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         // NOT itself the span). Same threshold used to flag it suspect. Length has no
         // GIFA-implied ceiling to check against, so just a basic sanity floor.
         const impliedExtW = G.groundArea && G.lengthMm ? (G.groundArea / (G.lengthMm / 1000)) * 1000 + 600 : null;
-        const widthPlausible = gfW && gfW > 2000 && (!impliedExtW || gfW <= impliedExtW + 1500);
+        // The GIFA-implied ceiling assumes GIFA ≈ L×W, which only holds for a rectangle.
+        // When widthSuspect was triggered by the independent cross-check (Claude's own
+        // floor-plan read disagreeing with DocAI), applying that SAME ceiling to validate
+        // the correction is circular — it will reject the correct wider value for exactly
+        // the reason (non-rectangular GIFA-vs-bounding-box mismatch) the cross-check exists
+        // to catch. Confirmed on Spaunton: true width 9215mm, GIFA-implied ceiling 9160mm —
+        // the correct value fails its own validation by 55mm. Only apply the ceiling when
+        // widthSuspect came from the GIFA heuristic itself; a basic sanity range otherwise.
+        const widthPlausible = G.widthSuspectSource === 'crosscheck'
+          ? (gfW && gfW > 2000 && gfW < 20000)
+          : (gfW && gfW > 2000 && (!impliedExtW || gfW <= impliedExtW + 1500));
         const lengthPlausible = gfL && gfL > 2000;
         // Only overwrite a dimension if the read is plausible AND (it was missing/null
         // to begin with, OR the width-specific suspect check flagged it) — never let an
