@@ -218,6 +218,55 @@ select option{background:#171a20;color:#f0f1f3}
           <div class="ext-wall"><span>Right</span><select id="wcRight"><option value="new">New external</option><option value="party">Party / shared (exclude)</option><option value="knock">Knock-through</option></select></div>
         </div>
       </div>
+
+      <div id="houseShapeSetup" style="display:block;margin-top:1rem">
+        <div class="ext-walls-t">Footprint shape</div>
+        <div class="pm-toggle" id="shapeToggle">
+          <button type="button" class="pm-btn on" id="shapeRect" onclick="setHouseShape('rectangle')">Rectangle</button>
+          <button type="button" class="pm-btn" id="shapeL" onclick="setHouseShape('lshape')">L-shape / notch</button>
+          <button type="button" class="pm-btn" id="shapeAbut" onclick="setHouseShape('abutment')">Abutment (garage / wing)</button>
+        </div>
+
+        <div id="lshapeSetup" style="display:none;margin-top:.85rem">
+          <div class="ext-hint">Bounding length &times; width still come from the drawing. A corner notch doesn't change external wall area (the shortened walls and the new notch walls cancel out) &mdash; it only reduces floor area (GIFA). This step corrects GIFA-driven quantities (screed, insulation, flooring, partition estimate); the envelope figure stays at the bounding-rectangle value.</div>
+          <div class="ext-hint" style="margin-top:.4rem;color:var(--mu2,#999)">A real L-shaped roof usually has a valley and extra gable ends a flat bounding rectangle can't capture &mdash; the envelope figure may still under-read for this reason. Known, flagged limitation, not a silent error.</div>
+          <div class="g3">
+            <div class="field"><label>Notch depth (m)</label><input id="notchDepth" type="number" step="0.1" value="2"/></div>
+            <div class="field"><label>Notch width (m)</label><input id="notchWidth" type="number" step="0.1" value="2"/></div>
+            <div class="field"><label>Notch corner</label><select id="notchCorner">
+              <option value="front-left">Front-left</option><option value="front-right">Front-right</option>
+              <option value="rear-left">Rear-left</option><option value="rear-right">Rear-right</option>
+            </select></div>
+          </div>
+        </div>
+
+        <div id="abutmentSetup" style="display:none;margin-top:.85rem">
+          <div class="ext-hint">For an integral garage or a rear/side wing at a different footprint or height &mdash; e.g. a single-storey extension under a 2-storey house, or a wing that doesn't continue to the first floor.</div>
+          <div class="g3">
+            <div class="field"><label>Abutment length (m)</label><input id="abutL" type="number" step="0.1" value="3"/></div>
+            <div class="field"><label>Abutment width (m)</label><input id="abutW" type="number" step="0.1" value="5.5"/></div>
+            <div class="field"><label>Abutment height (m) &mdash; blank = same as main house</label><input id="abutH" type="number" step="0.1" placeholder="e.g. 2.6"/></div>
+          </div>
+          <div class="g3">
+            <div class="field"><label>Which side</label><select id="abutSide">
+              <option value="front">Front</option><option value="rear">Rear</option><option value="left">Left</option><option value="right">Right</option>
+            </select></div>
+            <div class="field"><label>Floors</label><select id="abutFloors">
+              <option value="ground">Ground floor only</option><option value="both">Ground and first floor</option>
+            </select></div>
+          </div>
+        </div>
+
+        <label class="ext-check" style="margin-top:.85rem;display:block"><input type="checkbox" id="hasPorch" onchange="togglePorch()"/> Has a porch / canopy with its own window(s)</label>
+        <div id="porchSetup" style="display:none;margin-top:.6rem">
+          <div class="ext-hint">Small porches rarely move the envelope figure much, but their windows are easy for extraction to miss or misattribute — enter them here so they're never lost regardless of what the drawing read finds.</div>
+          <div class="g3">
+            <div class="field"><label>Porch window(s) &mdash; qty</label><input id="porchWinQty" type="number" step="1" min="0" value="1"/></div>
+            <div class="field"><label>Width (m)</label><input id="porchWinW" type="number" step="0.05" value="0.6"/></div>
+            <div class="field"><label>Height (m)</label><input id="porchWinH" type="number" step="0.05" value="1.2"/></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -563,7 +612,7 @@ const MXW15=1.15;    // higher wastage for wall ties (15%)
 const mxFN=n=>parseFloat(n)||0;
 const mxF2=n=>Math.round(n*100)/100;
 
-function mxiFA(m){return mxFN(m.floor.L)*mxFN(m.floor.W);}
+function mxiFA(m){return (m._gifaOverride!=null)?m._gifaOverride:mxFN(m.floor.L)*mxFN(m.floor.W);}
 // External brickwork areas. Returns gross (incl gables), the deducted opening
 // area, and net. Deduction rule (agreed QS basis):
 //   - external openings ONLY (internal doors never reduce the outer leaf)
@@ -1171,6 +1220,64 @@ function buildModel(parsed, projName, clientName){
     m.walls=parsed.walls.filter(function(w){return w.length_m&&w.length_m>0;}).map(function(w){return{label:w.label||'Wall',L:Math.round(w.length_m*1000)/1000,H:w.height_m||extH,ext:w.is_external!==false,gable_area_m2:w.gable_area_m2||0};});
   }
   else if(parsed.floor&&parsed.floor.length_m&&parsed.floor.width_m){var L=parsed.floor.length_m,W2=parsed.floor.width_m,H=m.ceilingH||2.4;m.walls=[{label:'Front wall',L:L,H:H,ext:true},{label:'Rear wall',L:L,H:H,ext:true},{label:'Left wall',L:W2,H:H,ext:true},{label:'Right wall',L:W2,H:H,ext:true}];}
+
+  // ── HOUSE SHAPE WIZARD OVERRIDE ──────────────────────────────────────────
+  // houseShape is set by the Project Type panel's shape toggle (global, default
+  // 'rectangle' = no change from the code above). Only fires for whole-house mode.
+  if(typeof houseShape!=='undefined' && houseShape!=='rectangle' && m.mode==='house' && m.walls.length>0){
+    var _wallH=(m.walls[0]&&m.walls[0].H)||m.ceilingH||2.4;
+    if(houseShape==='lshape'){
+      // CONFIRMED GEOMETRY (not assumed): cutting a rectangular notch from a corner of
+      // a bounding box does NOT change total wall perimeter/area — the two shortened
+      // outer walls and the two new notch-facing walls cancel exactly. Proven directly:
+      // for L=10,W=8,notch 3x4, both the plain rectangle and the notched shape sum to
+      // 36m of perimeter. So this step deliberately does NOT rebuild m.walls at all —
+      // doing so would give a false impression of having fixed the envelope figure when
+      // mathematically it can't move. What a notch DOES genuinely change is floor area
+      // (GIFA), which this step corrects via m._gifaOverride, used by mxiFA(). The
+      // envelope stays at the bounding-rectangle value and is flagged (not silently
+      // wrong) via m._shapeNote, since a real L-shaped roof's valley and extra gable
+      // ends aren't captured by a flat rectangle model — that needs roof-form input
+      // this step doesn't collect.
+      var _nd=parseFloat(val('notchDepth','0'))||0, _nw=parseFloat(val('notchWidth','0'))||0;
+      if(_nd>0&&_nw>0){
+        var _notchArea=_nd*_nw;
+        m._gifaOverride=Math.max(0, mxFN(m.floor.L)*mxFN(m.floor.W) - _notchArea);
+        m._shapeNote='L-shape notch applied: GIFA reduced by '+_notchArea.toFixed(1)+'m² (bounding '+m.floor.L+'\u00d7'+m.floor.W+' minus '+_nd+'\u00d7'+_nw+' notch). Envelope figure is unchanged by the notch (a corner cut doesn\u2019t alter wall perimeter) and stays at the bounding-rectangle value — a real L-shaped roof\u2019s valley/extra gable ends aren\u2019t modelled here, so envelope may still under-read for that reason. Known limitation, not a silent error.';
+      }
+    }
+    else if(houseShape==='abutment'){
+      // Genuine second volume — unlike a notch, this DOES add real wall area: the
+      // abutment's own new external walls, minus the one shared/party wall with the
+      // main house (excluded from external reckoning via cls:'internal', mirroring the
+      // extension mode's party-wall exclusion pattern).
+      var _aL=parseFloat(val('abutL','0'))||0, _aW=parseFloat(val('abutW','0'))||0;
+      var _aHraw=val('abutH',''), _aH=parseFloat(_aHraw); if(!(_aH>0)) _aH=_wallH;
+      var _side=val('abutSide','rear'), _floors=val('abutFloors','ground');
+      if(_aL>0&&_aW>0){
+        // The abutment's footprint sits against one side of the main box; the wall of
+        // the main box it attaches to becomes internal (shared), not external. The
+        // abutment contributes 3 new external walls (its far end + 2 returns) at _aH.
+        // 'ground' floors means this only applies at ground-floor height even if the
+        // main house is 2-storey (e.g. a single-storey garage under a 2-storey house);
+        // 'both' means it runs the full main-house height instead of its own _aH.
+        var _abutWallH=(_floors==='both')?_wallH:_aH;
+        m.walls.push({label:'Abutment far end',L:_aW,H:_abutWallH,ext:true});
+        m.walls.push({label:'Abutment return 1',L:_aL,H:_abutWallH,ext:true});
+        m.walls.push({label:'Abutment return 2',L:_aL,H:_abutWallH,ext:true});
+        // Mark the corresponding length of the main house's wall on that side as
+        // internal/shared — reduce that wall's effective external length by the
+        // abutment's attaching width, same principle as excluding a party wall.
+        var _mainWallLabelMap={front:'Front wall',rear:'Rear wall',left:'Left wall',right:'Right wall'};
+        var _mainWall=null;
+        for(var _wi=0;_wi<m.walls.length;_wi++){ if(m.walls[_wi].label===_mainWallLabelMap[_side]){ _mainWall=m.walls[_wi]; break; } }
+        if(_mainWall){ _mainWall.L=Math.max(0, mxFN(_mainWall.L)-_aW); }
+        m._shapeNote='Abutment applied: '+_aL+'\u00d7'+_aW+'m at '+(_abutWallH).toFixed(2)+'m height, '+_side+' side, '+(_floors==='both'?'full building height':'ground floor only')+'. Shared wall excluded from external reckoning; adds genuine extra wall area (unlike a notch, this is a real second volume).';
+      }
+    }
+  }
+
+
   var op=[];
   // Keep EVERY opening the extractor found, even ones missing width and/or height —
   // an opening on the plan with no dimensions yet is exactly the gap the schedule
@@ -1187,6 +1294,18 @@ function buildModel(parsed, projName, clientName){
     var hasW=!!w.structural_w_mm, hasH=!!w.structural_h_mm;
     op.push({label:(w.ref||'Window')+' \u2014 '+(w.location||'')+(w.type==='bay'?' (Bay)':''),W:hasW?Math.round(w.structural_w_mm)/1000:undefined,H:hasH?Math.round(w.structural_h_mm)/1000:undefined,qty:1,type:'window',_hasW:hasW,_hasH:hasH});});}
   if(op.length>0)m.openings=op;
+  // Porch/canopy windows — added directly regardless of what extraction found, since
+  // small porches are easy for the extractor to miss or misattribute (evidence: porch
+  // windows on Meynell/Mortain were captured inconsistently between runs). Must run
+  // AFTER m.openings=op above, or this would be silently overwritten.
+  if(typeof document!=='undefined' && document.getElementById('hasPorch') && document.getElementById('hasPorch').checked){
+    var _pQty=parseInt(val('porchWinQty','0'),10)||0;
+    var _pW=parseFloat(val('porchWinW','0'))||0, _pH=parseFloat(val('porchWinH','0'))||0;
+    if(_pQty>0&&_pW>0&&_pH>0){
+      m.openings=m.openings||[];
+      m.openings.push({label:'Porch window',W:_pW,H:_pH,qty:_pQty,type:'window',external:true,_hasW:true,_hasH:true});
+    }
+  }
   // ── Auto-tag integral-garage doors as FD30 fire doors (Building Regs Part B) ──
   // The extractor never supplies o.fireDoor itself; infer it from the door's location
   // text. Restricted to INTERNAL doors — the garage's own external door to the outside
@@ -1645,9 +1764,29 @@ function buildModelExt(parsed, projName, clientName){
 var projectMode='house';
 function setProjectMode(mode){
   projectMode=mode;
-  var h=document.getElementById('pmHouse'),x=document.getElementById('pmExt'),s=document.getElementById('extSetup');
+  var h=document.getElementById('pmHouse'),x=document.getElementById('pmExt'),s=document.getElementById('extSetup'),hs=document.getElementById('houseShapeSetup');
   if(h)h.classList.toggle('on',mode==='house'); if(x)x.classList.toggle('on',mode==='extension');
   if(s)s.style.display=(mode==='extension')?'block':'none';
+  if(hs)hs.style.display=(mode==='house')?'block':'none';
+}
+
+// House-shape wizard — default Rectangle, zero extra fields (2-click safeguard).
+// Detail panels only appear once a non-rectangle shape is explicitly chosen.
+var houseShape='rectangle';
+function setHouseShape(shape){
+  houseShape=shape;
+  ['shapeRect','shapeL','shapeAbut'].forEach(function(id){
+    var b=document.getElementById(id); if(b)b.classList.remove('on');
+  });
+  var map={rectangle:'shapeRect',lshape:'shapeL',abutment:'shapeAbut'};
+  var active=document.getElementById(map[shape]); if(active)active.classList.add('on');
+  var ls=document.getElementById('lshapeSetup'), ab=document.getElementById('abutmentSetup');
+  if(ls)ls.style.display=(shape==='lshape')?'block':'none';
+  if(ab)ab.style.display=(shape==='abutment')?'block':'none';
+}
+function togglePorch(){
+  var c=document.getElementById('hasPorch'), p=document.getElementById('porchSetup');
+  if(p)p.style.display=(c&&c.checked)?'block':'none';
 }
 
 /* ── renderers ── */
@@ -1752,6 +1891,7 @@ function renderScheduleAndPanel(data){
   if(lastModel&&lastModel._floorAreaNote)warnBits.push(lastModel._floorAreaNote);
   if(lastModel&&lastModel._floorAreaNote2)warnBits.push(lastModel._floorAreaNote2); if(lastModel&&lastModel._openingNote)warnBits.push(lastModel._openingNote);
   if(lastModel&&lastModel._wallHeightNote)warnBits.push(lastModel._wallHeightNote);
+  if(lastModel&&lastModel._shapeNote)warnBits.push(lastModel._shapeNote);
   var warnHTML=warnBits.length?'<div class="sched-note">Review before ordering: '+warnBits.join(' · ')+'</div>':'';
   document.getElementById('resSchedule').innerHTML =
     internalWallPanelHTML()+
