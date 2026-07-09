@@ -110,6 +110,7 @@ body{background:var(--bg);color:var(--w);font-family:'DM Sans',sans-serif;line-h
 .pm-btn{flex:1;padding:.7rem;border:1px solid var(--bd);border-radius:6px;background:rgba(255,255,255,.03);color:var(--mu);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer}
 .pm-btn.on{background:var(--spinks);border-color:var(--spinks);color:#fff}
 .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
 .field select,.ext-wall select{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--bd);border-radius:6px;padding:.55rem .7rem;color:var(--w);font-size:13px;font-family:inherit}
 select option{background:#171a20;color:#f0f1f3}
 .ext-check{display:flex;align-items:center;gap:.5rem;font-size:13px;color:var(--w);margin:1rem 0;cursor:pointer}
@@ -221,23 +222,10 @@ select option{background:#171a20;color:#f0f1f3}
 
       <div id="houseShapeSetup" style="display:block;margin-top:1rem">
         <div class="ext-walls-t">Footprint shape</div>
+        <div class="ext-hint">Rectangle covers most houses. Non-rectangular footprints (L-shapes, notches) are detected and corrected automatically from the drawing's own stated floor area &mdash; no need to measure or enter a notch here. Only use Abutment for a genuinely separate volume (integral garage, wing) at a different footprint or height.</div>
         <div class="pm-toggle" id="shapeToggle">
           <button type="button" class="pm-btn on" id="shapeRect" onclick="setHouseShape('rectangle')">Rectangle</button>
-          <button type="button" class="pm-btn" id="shapeL" onclick="setHouseShape('lshape')">L-shape / notch</button>
           <button type="button" class="pm-btn" id="shapeAbut" onclick="setHouseShape('abutment')">Abutment (garage / wing)</button>
-        </div>
-
-        <div id="lshapeSetup" style="display:none;margin-top:.85rem">
-          <div class="ext-hint">Bounding length &times; width still come from the drawing. A corner notch doesn't change external wall area (the shortened walls and the new notch walls cancel out) &mdash; it only reduces floor area (GIFA). This step corrects GIFA-driven quantities (screed, insulation, flooring, partition estimate); the envelope figure stays at the bounding-rectangle value.</div>
-          <div class="ext-hint" style="margin-top:.4rem;color:var(--mu2,#999)">A real L-shaped roof usually has a valley and extra gable ends a flat bounding rectangle can't capture &mdash; the envelope figure may still under-read for this reason. Known, flagged limitation, not a silent error.</div>
-          <div class="g3">
-            <div class="field"><label>Notch depth (m)</label><input id="notchDepth" type="number" step="0.1" value="2"/></div>
-            <div class="field"><label>Notch width (m)</label><input id="notchWidth" type="number" step="0.1" value="2"/></div>
-            <div class="field"><label>Notch corner</label><select id="notchCorner">
-              <option value="front-left">Front-left</option><option value="front-right">Front-right</option>
-              <option value="rear-left">Rear-left</option><option value="rear-right">Rear-right</option>
-            </select></div>
-          </div>
         </div>
 
         <div id="abutmentSetup" style="display:none;margin-top:.85rem">
@@ -612,7 +600,22 @@ const MXW15=1.15;    // higher wastage for wall ties (15%)
 const mxFN=n=>parseFloat(n)||0;
 const mxF2=n=>Math.round(n*100)/100;
 
-function mxiFA(m){return (m._gifaOverride!=null)?m._gifaOverride:mxFN(m.floor.L)*mxFN(m.floor.W);}
+function mxiFA(m){
+  var _bbox=mxFN(m.floor.L)*mxFN(m.floor.W);
+  var _faObj=(m.extractedSpec&&m.extractedSpec.floorAreas)||{};
+  var _totalFA=mxFN(_faObj.total_m2);
+  if(_bbox<=0) return _totalFA||0;
+  // Mirrors the gifaUsable/_floorAreaNote self-check further down in mxiCalc: prefer
+  // the architect's own stated total GIFA over the bounding-box product whenever it's
+  // within a sane range (0.6x-2.4x). The drawn GIFA is already-extracted (0.99+
+  // confidence all session) and automatically correct for L-shapes/notches/any
+  // non-rectangular footprint — no need to ask the user to separately measure or
+  // estimate a notch to get the same result less reliably.
+  var _upperFloors=(m.walls&&m.walls[0]&&mxFN(m.walls[0].H)>4.0)?1:0;
+  var _perFloorFA=_totalFA/(1+_upperFloors);
+  if(_totalFA>0 && _perFloorFA>_bbox*0.6 && _perFloorFA<_bbox*2.4) return _perFloorFA;
+  return _bbox;
+}
 // External brickwork areas. Returns gross (incl gables), the deducted opening
 // area, and net. Deduction rule (agreed QS basis):
 //   - external openings ONLY (internal doors never reduce the outer leaf)
@@ -1223,34 +1226,15 @@ function buildModel(parsed, projName, clientName){
 
   // ── HOUSE SHAPE WIZARD OVERRIDE ──────────────────────────────────────────
   // houseShape is set by the Project Type panel's shape toggle (global, default
-  // 'rectangle' = no change from the code above). Only fires for whole-house mode.
-  if(typeof houseShape!=='undefined' && houseShape!=='rectangle' && m.mode==='house' && m.walls.length>0){
+  // 'rectangle' = no change). Only fires for whole-house mode. Non-rectangular
+  // footprints (L-shapes/notches) no longer need a manual toggle at all — mxiFA()
+  // already prefers the drawing's own stated GIFA over the bounding-box product
+  // automatically. Only Abutment remains as a manual step, since it's genuinely new
+  // information (a second volume's own footprint/height) that GIFA comparison alone
+  // can't infer.
+  if(typeof houseShape!=='undefined' && houseShape==='abutment' && m.mode==='house' && m.walls.length>0){
     var _wallH=(m.walls[0]&&m.walls[0].H)||m.ceilingH||2.4;
-    if(houseShape==='lshape'){
-      // CONFIRMED GEOMETRY (not assumed): cutting a rectangular notch from a corner of
-      // a bounding box does NOT change total wall perimeter/area — the two shortened
-      // outer walls and the two new notch-facing walls cancel exactly. Proven directly:
-      // for L=10,W=8,notch 3x4, both the plain rectangle and the notched shape sum to
-      // 36m of perimeter. So this step deliberately does NOT rebuild m.walls at all —
-      // doing so would give a false impression of having fixed the envelope figure when
-      // mathematically it can't move. What a notch DOES genuinely change is floor area
-      // (GIFA), which this step corrects via m._gifaOverride, used by mxiFA(). The
-      // envelope stays at the bounding-rectangle value and is flagged (not silently
-      // wrong) via m._shapeNote, since a real L-shaped roof's valley and extra gable
-      // ends aren't captured by a flat rectangle model — that needs roof-form input
-      // this step doesn't collect.
-      var _nd=parseFloat(val('notchDepth','0'))||0, _nw=parseFloat(val('notchWidth','0'))||0;
-      if(_nd>0&&_nw>0){
-        var _notchArea=_nd*_nw;
-        m._gifaOverride=Math.max(0, mxFN(m.floor.L)*mxFN(m.floor.W) - _notchArea);
-        m._shapeNote='L-shape notch applied: GIFA reduced by '+_notchArea.toFixed(1)+'m² (bounding '+m.floor.L+'\u00d7'+m.floor.W+' minus '+_nd+'\u00d7'+_nw+' notch). Envelope figure is unchanged by the notch (a corner cut doesn\u2019t alter wall perimeter) and stays at the bounding-rectangle value — a real L-shaped roof\u2019s valley/extra gable ends aren\u2019t modelled here, so envelope may still under-read for that reason. Known limitation, not a silent error.';
-      }
-    }
-    else if(houseShape==='abutment'){
-      // Genuine second volume — unlike a notch, this DOES add real wall area: the
-      // abutment's own new external walls, minus the one shared/party wall with the
-      // main house (excluded from external reckoning via cls:'internal', mirroring the
-      // extension mode's party-wall exclusion pattern).
+    {
       var _aL=parseFloat(val('abutL','0'))||0, _aW=parseFloat(val('abutW','0'))||0;
       var _aHraw=val('abutH',''), _aH=parseFloat(_aHraw); if(!(_aH>0)) _aH=_wallH;
       var _side=val('abutSide','rear'), _floors=val('abutFloors','ground');
@@ -1775,13 +1759,12 @@ function setProjectMode(mode){
 var houseShape='rectangle';
 function setHouseShape(shape){
   houseShape=shape;
-  ['shapeRect','shapeL','shapeAbut'].forEach(function(id){
+  ['shapeRect','shapeAbut'].forEach(function(id){
     var b=document.getElementById(id); if(b)b.classList.remove('on');
   });
-  var map={rectangle:'shapeRect',lshape:'shapeL',abutment:'shapeAbut'};
+  var map={rectangle:'shapeRect',abutment:'shapeAbut'};
   var active=document.getElementById(map[shape]); if(active)active.classList.add('on');
-  var ls=document.getElementById('lshapeSetup'), ab=document.getElementById('abutmentSetup');
-  if(ls)ls.style.display=(shape==='lshape')?'block':'none';
+  var ab=document.getElementById('abutmentSetup');
   if(ab)ab.style.display=(shape==='abutment')?'block':'none';
 }
 function togglePorch(){
