@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.20.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.20.1', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -547,14 +547,29 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         // to catch. Confirmed on Spaunton: true width 9215mm, GIFA-implied ceiling 9160mm —
         // the correct value fails its own validation by 55mm. Only apply the ceiling when
         // widthSuspect came from the GIFA heuristic itself; a basic sanity range otherwise.
-        const widthPlausible = G.widthSuspectSource === 'crosscheck'
+        // Mirror of the length self-sufficiency check below: if Route C's own fresh gfW
+        // disagrees with the existing width, act on it directly rather than requiring
+        // widthSuspect to have been set by a separate, earlier (and non-deterministic)
+        // staged check. Uses the same relaxed (non-GIFA-ceiling) plausibility as the
+        // crosscheck source, since a direct disagreement is the same class of evidence.
+        const widthDisagreesDirect = G.widthMm && gfW && Math.abs(gfW - G.widthMm) > 300;
+        const widthPlausible = (G.widthSuspectSource === 'crosscheck' || widthDisagreesDirect)
           ? (gfW && gfW > 2000 && gfW < 20000)
           : (gfW && gfW > 2000 && (!impliedExtW || gfW <= impliedExtW + 1500));
         const lengthPlausible = gfL && gfL > 2000;
         // Only overwrite a dimension if the read is plausible AND (it was missing/null
         // to begin with, OR the length/width-specific suspect check flagged it) — never
         // let an implausible read clobber a perfectly good existing value.
-        const useLength = lengthPlausible && (!G.lengthMm || G.lengthSuspect);
+        // Route C already fetches gfL in THIS call whenever it fires for any reason
+        // (widthSuspect, missingDims, or lengthSuspect) — don't make applying it depend
+        // on a SEPARATE, earlier staged cross-check having independently caught the same
+        // disagreement first. Confirmed needed on Haselbech: width corrected correctly
+        // via this exact call (gfL=9828 was already sitting in the same response used to
+        // fix width), but length stayed wrong because the upstream staged check hadn't
+        // flagged lengthSuspect that particular run — two separate Claude calls having to
+        // independently agree before acting is fragile. Trust this call's own read.
+        const lengthDisagrees = G.lengthMm && gfL && Math.abs(gfL - G.lengthMm) > 300;
+        const useLength = lengthPlausible && (!G.lengthMm || G.lengthSuspect || lengthDisagrees);
         // If length was just recovered, the ORIGINAL widthSuspect check never had a
         // chance to run (it needs a length to compare against) — re-run the same
         // GIFA-implied-width logic now that a real length is known, so a width that
@@ -563,7 +578,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         // length itself came back empty — the plan's real width was 8315.
         const impliedExtWWithNewLength = G.groundArea && useLength && gfL ? (G.groundArea / (gfL / 1000)) * 1000 + 600 : null;
         const widthSuspectAfterLengthFix = !!(useLength && G.widthMm && impliedExtWWithNewLength && G.widthMm > impliedExtWWithNewLength + 1500);
-        const useWidth = widthPlausible && (!G.widthMm || G.widthSuspect || widthSuspectAfterLengthFix);
+        const useWidth = widthPlausible && (!G.widthMm || G.widthSuspect || widthSuspectAfterLengthFix || widthDisagreesDirect);
         if (useWidth || useLength) {
           const newLengthMm = useLength ? gfL : G.lengthMm;
           const newWidthMm = useWidth ? gfW : G.widthMm;
