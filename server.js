@@ -569,7 +569,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         // flagged lengthSuspect that particular run — two separate Claude calls having to
         // independently agree before acting is fragile. Trust this call's own read.
         const lengthDisagrees = G.lengthMm && gfL && Math.abs(gfL - G.lengthMm) > 300;
-        const useLength = lengthPlausible && (!G.lengthMm || G.lengthSuspect || lengthDisagrees);
+        let useLength = lengthPlausible && (!G.lengthMm || G.lengthSuspect || lengthDisagrees);
         // If length was just recovered, the ORIGINAL widthSuspect check never had a
         // chance to run (it needs a length to compare against) — re-run the same
         // GIFA-implied-width logic now that a real length is known, so a width that
@@ -578,7 +578,39 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         // length itself came back empty — the plan's real width was 8315.
         const impliedExtWWithNewLength = G.groundArea && useLength && gfL ? (G.groundArea / (gfL / 1000)) * 1000 + 600 : null;
         const widthSuspectAfterLengthFix = !!(useLength && G.widthMm && impliedExtWWithNewLength && G.widthMm > impliedExtWWithNewLength + 1500);
-        const useWidth = widthPlausible && (!G.widthMm || G.widthSuspect || widthSuspectAfterLengthFix || widthDisagreesDirect);
+        let useWidth = widthPlausible && (!G.widthMm || G.widthSuspect || widthSuspectAfterLengthFix || widthDisagreesDirect);
+
+        // FINAL SAFEGUARD: does the resulting L x W actually match the real GIFA,
+        // regardless of how confidently the correction above was triggered? Confirmed
+        // needed on Kingsdale — two independent Claude calls agreed on 9440x8765 (both
+        // likely reading the same wrong dimension bar, e.g. a wallplate/stonework
+        // figure rather than the true wall-face footprint), implying a ~72m² per-floor
+        // net area against a real ~48m² GIFA. Two AI calls agreeing is not proof of
+        // correctness when both can share the same underlying mistake. Reject the
+        // correction (fall back to the original reading) if it implies a per-floor area
+        // wildly inconsistent (outside roughly 0.5x-1.5x) with real GIFA, when the
+        // original reading was itself more consistent.
+        if (useWidth || useLength) {
+          const realGifaPerFloor = merged.extra && merged.extra.floor_areas && parseFloat(merged.extra.floor_areas.ground_m2) || null;
+          const impliedNet = (lMm, wMm) => (lMm && wMm) ? (lMm/1000) * (wMm/1000) * 0.87 : null;
+          const candLengthMm = useLength ? gfL : G.lengthMm;
+          const candWidthMm = useWidth ? gfW : G.widthMm;
+          const newNet = impliedNet(candLengthMm, candWidthMm);
+          const oldNet = impliedNet(G.lengthMm, G.widthMm);
+          if (realGifaPerFloor && newNet) {
+            const newRatio = newNet / realGifaPerFloor;
+            const oldRatio = oldNet ? oldNet / realGifaPerFloor : null;
+            const newImplausible = newRatio > 1.35 || newRatio < 0.65;
+            const oldWasBetter = oldRatio && oldRatio <= 1.35 && oldRatio >= 0.65;
+            if (newImplausible && oldWasBetter) {
+              console.log(`Rejecting dimension correction — new L${candLengthMm}xW${candWidthMm} implies ${newNet.toFixed(1)}m² net vs real GIFA ${realGifaPerFloor.toFixed(1)}m² (ratio ${newRatio.toFixed(2)}), original reading was more consistent (ratio ${oldRatio.toFixed(2)}). Keeping original dimensions.`);
+              useWidth = false;
+              useLength = false;
+              merged.missing = merged.missing || [];
+              merged.missing.push('⚠ A floor-plan dimension re-read (' + (candLengthMm/1000).toFixed(3) + 'm x ' + (candWidthMm/1000).toFixed(3) + 'm) was rejected — it implies a floor area badly inconsistent with the drawing\u2019s own stated GIFA (' + realGifaPerFloor.toFixed(1) + 'm² per floor). Kept the original DocAI reading instead, which is more consistent with GIFA. CONFIRM the actual building dimensions from the drawing before relying on envelope/masonry quantities — this house may have a dimension bar that measures something other than the main wall-face footprint (e.g. a stonework/wallplate figure).');
+            }
+          }
+        }
         if (useWidth || useLength) {
           const newLengthMm = useLength ? gfL : G.lengthMm;
           const newWidthMm = useWidth ? gfW : G.widthMm;
@@ -705,24 +737,48 @@ function mergeDocAIResults(results) {
   const rawGroundArea = getNum('floor_area_ground_m2');
   const rawFirstArea = getNum('floor_area_first_m2');
   const totalArea = getNum('floor_area_total_m2');
-  // FLOOR-AREA SPLIT SANITY CHECK — some drawing sets (e.g. Ingreen/Brierley's Kirkby
-  // Malzeard site — confirmed on Whorlton and Spaunton) show only a single combined GIFA
-  // total in the title block ("4B/7P 116m2 (GIFA)"), with no ground/first breakdown at
-  // all — unlike drawings that do give an explicit per-floor split (RDC's, Align Property
-  // Partners'). DocAI's floor_area_ground_m2/first_m2 entities have no "not found" state:
-  // when there's genuinely no split to read, it has been observed to read the combined
-  // total straight into ground_m2 and fabricate an implausible first_m2 (17.5m² against
-  // a 116m² "ground" reading, at 0.9999 confidence) rather than leaving it null. Detect
-  // this pattern — no separate total found, and first far too small for a real 2-storey
-  // split (a genuine first floor is rarely below ~50% of ground) — and treat the ground
-  // reading as the likely combined total, splitting it evenly rather than trusting the
-  // fabricated split. Flagged for the surveyor, not silently substituted.
+  // FLOOR-AREA SPLIT SANITY CHECK — two distinct, confirmed real failure patterns, kept
+  // as separate cases rather than one unified formula, since conflating them risks
+  // getting both wrong:
+  //
+  // CASE A — no total found at all (some drawing sets, e.g. Ingreen/Brierley's Kirkby
+  // Malzeard site, show only a single combined GIFA total in the title block with no
+  // ground/first breakdown at all). DocAI's ground/first entities have no "not found"
+  // state: confirmed on Whorlton — it read the combined total straight into ground_m2
+  // (116m² at 0.9999 confidence) and fabricated an implausible first_m2 (17.5m²) rather
+  // than leaving it null. Detect: no total, first far too small vs ground — treat ground
+  // as the likely combined total and split it evenly.
+  //
+  // CASE B — a genuine total WAS found, but one of ground/first is missing or
+  // implausibly small against an even split of that known total. Confirmed on
+  // Kingsdale: total=96, ground=null, first=11.6 (a single room's area, not a genuine
+  // first floor). Prefer deriving the bad one as total-minus-the-other when the other
+  // looks sane; fall back to an even split when neither can be trusted.
+  //
+  // Both cases flag the assumption for the surveyor rather than silently substituting.
   let floorSplitSuspect = false;
   let groundArea = rawGroundArea, firstArea = rawFirstArea;
   if (!totalArea && rawGroundArea && rawFirstArea && rawFirstArea < rawGroundArea * 0.5) {
     floorSplitSuspect = true;
     groundArea = rawGroundArea / 2;
     firstArea = rawGroundArea / 2;
+  } else if (totalArea) {
+    const expectedPerFloor = totalArea / 2;
+    const groundBad = (rawGroundArea == null) || (rawGroundArea < expectedPerFloor * 0.3);
+    const firstBad = (rawFirstArea == null) || (rawFirstArea < expectedPerFloor * 0.3);
+    if (groundBad && firstBad) {
+      floorSplitSuspect = true;
+      groundArea = expectedPerFloor;
+      firstArea = expectedPerFloor;
+    } else if (groundBad) {
+      floorSplitSuspect = true;
+      const derived = totalArea - rawFirstArea;
+      groundArea = (derived > expectedPerFloor * 0.3) ? derived : expectedPerFloor;
+    } else if (firstBad) {
+      floorSplitSuspect = true;
+      const derived = totalArea - rawGroundArea;
+      firstArea = (derived > expectedPerFloor * 0.3) ? derived : expectedPerFloor;
+    }
   }
   const lengthMm = getNum('overall_length_mm');
   const rawWidthMm = getNum('overall_width_mm');
@@ -802,7 +858,7 @@ function mergeDocAIResults(results) {
     const tooTall = extWallHeightMm > plausibleMaxEavesMm;
     missing.push('⚠ Wall height (' + (extWallHeightMm/1000).toFixed(3) + 'm) looks ' + (tooTall ? 'too tall — may be the RIDGE or COPING APEX height, not EAVES' : 'too short — may be a misread ceiling height or window dimension, not the full EAVES height') + ' for a ' + storeysForHeight + '-storey building. CONFIRM the eaves height from the elevation and correct in the Dimensions tab before relying on wall/gable/skirting/soffit quantities.');
   }
-  if (floorSplitSuspect) missing.push('⚠ Ground/first floor split (' + rawGroundArea + 'm² / ' + rawFirstArea + 'm² read) looks fabricated — this drawing may only show a single combined GIFA total with no per-floor breakdown. Assumed an even 50/50 split (' + groundArea.toFixed(1) + 'm² each) — CONFIRM the actual ground/first areas from the drawing and correct in the Dimensions tab before relying on partition area, skirting, or storey-count-dependent quantities.');
+  if (floorSplitSuspect) missing.push('⚠ Ground/first floor split (read as ' + (rawGroundArea!=null?rawGroundArea+'m²':'not found') + ' ground / ' + (rawFirstArea!=null?rawFirstArea+'m²':'not found') + ' first' + (totalArea?(', total '+totalArea+'m²'):'') + ') looks wrong — ' + (totalArea ? 'one floor is missing or implausibly small against an even split of the known total' : 'this drawing may only show a single combined GIFA total with no per-floor breakdown') + '. Corrected to ' + groundArea.toFixed(1) + 'm² ground / ' + firstArea.toFixed(1) + 'm² first — CONFIRM the actual ground/first areas from the drawing before relying on partition area, skirting, or storey-count-dependent quantities.');
   if (!roofPitch) missing.push('Roof pitch angle — enter manually in Spec & Roof tab');
 
   const notes = [];
