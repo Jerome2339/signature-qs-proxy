@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.19.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.20.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
