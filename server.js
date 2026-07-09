@@ -467,6 +467,7 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
           const gW = od.ground_floor_width_mm, gL = od.ground_floor_length_mm;
           const fW = od.first_floor_width_mm, fL = od.first_floor_length_mm;
           const docaiW = merged.floor && merged.floor.width_m ? Math.round(merged.floor.width_m*1000) : null;
+          const docaiL = merged.floor && merged.floor.length_m ? Math.round(merged.floor.length_m*1000) : null;
           const notes = [];
           if (gW && fW && Math.abs(gW - fW) > 150) notes.push(`ground/first width differ (${gW} vs ${fW}) — likely bay/projection`);
           if (gL && fL && Math.abs(gL - fL) > 150) notes.push(`ground/first length differ (${gL} vs ${fL}) — likely bay/projection`);
@@ -482,6 +483,17 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
             // own fresh floor-plan read to actually correct it, rather than trusting gW
             // directly here.
             if (merged._geom) { merged._geom.widthSuspect = true; merged._geom.widthSuspectSource = 'crosscheck'; }
+          }
+          // Mirror of the width cross-check above, for length — confirmed needed on
+          // Haselbech: DocAI's overall_length_mm (11500, 0.9996 confidence) was actually
+          // 17% too long against the floor-plan's real 9828mm. Route C only ever
+          // recovers a MISSING length (useLength requires !G.lengthMm) — it had no way
+          // to catch a length that was simply WRONG but present, the same gap the width
+          // cross-check above was built to close. lengthSuspect/lengthSuspectSource feed
+          // Route C's useLength decision below the same way widthSuspect does for width.
+          if (gL && docaiL && Math.abs(gL - docaiL) > 300) {
+            notes.push(`floor-plan length (${gL}) disagrees with DocAI length (${docaiL}) — DocAI value may be wrong; floor plan is authoritative`);
+            if (merged._geom) { merged._geom.lengthSuspect = true; merged._geom.lengthSuspectSource = 'crosscheck'; }
           }
           merged.extra.floorplan_dimensions_check = notes.length ? notes : ['floor-plan dimensions read; consistent'];
           console.log(`Floor-plan dimensions (inspection): GF ${gL}x${gW}, FF ${fL}x${fW} | ${notes.join(' | ')||'consistent'}`);
@@ -513,9 +525,11 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
     try {
       const G = merged._geom;
       const missingDims = G && (!G.lengthMm || !G.widthMm);
-      if (G && (G.widthSuspect || missingDims) && ANTHROPIC_KEY && req.files && req.files.length) {
+      if (G && (G.widthSuspect || G.lengthSuspect || missingDims) && ANTHROPIC_KEY && req.files && req.files.length) {
         console.log(G.widthSuspect
           ? `Width ${G.widthMm}mm failed GIFA sanity — firing floor-plan dimension read…`
+          : G.lengthSuspect
+          ? `Length ${G.lengthMm}mm disagreed with the floor-plan cross-check — firing floor-plan dimension read…`
           : `Length/width missing (L=${G.lengthMm}, W=${G.widthMm}) — firing floor-plan dimension read…`);
         const fp = await readFloorPlanDimensions(req.files);
         const gfW = fp && fp.ground_floor_width_mm ? parseFloat(fp.ground_floor_width_mm) : null;
@@ -538,9 +552,9 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
           : (gfW && gfW > 2000 && (!impliedExtW || gfW <= impliedExtW + 1500));
         const lengthPlausible = gfL && gfL > 2000;
         // Only overwrite a dimension if the read is plausible AND (it was missing/null
-        // to begin with, OR the width-specific suspect check flagged it) — never let an
-        // implausible read clobber a perfectly good existing value.
-        const useLength = lengthPlausible && !G.lengthMm;
+        // to begin with, OR the length/width-specific suspect check flagged it) — never
+        // let an implausible read clobber a perfectly good existing value.
+        const useLength = lengthPlausible && (!G.lengthMm || G.lengthSuspect);
         // If length was just recovered, the ORIGINAL widthSuspect check never had a
         // chance to run (it needs a length to compare against) — re-run the same
         // GIFA-implied-width logic now that a real length is known, so a width that
@@ -564,9 +578,10 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
           if (useWidth && !G.widthSuspect) merged.missing = (merged.missing || []).filter(x => !/Overall building width/.test(x));
           merged.notes = merged.notes || [];
           if (useWidth) merged.notes.push(`Building width corrected to ${(newWidthMm/1000).toFixed(3)}m from the floor-plan read (extracted ${G.widthMm ? (G.widthMm/1000).toFixed(3)+'m looked like the roof span' : 'was missing'}).`);
-          if (useLength) merged.notes.push(`Building length filled in from the floor-plan read (${(newLengthMm/1000).toFixed(3)}m) — DocAI did not return an overall_length_mm value this run.`);
+          if (useLength) merged.notes.push(`Building length corrected to ${(newLengthMm/1000).toFixed(3)}m from the floor-plan read (extracted ${G.lengthMm ? (G.lengthMm/1000).toFixed(3)+'m disagreed with the floor plan' : 'was missing'}).`);
           merged.extra = merged.extra || {};
           merged.extra.width_correction = { from_mm: G.widthMm, to_mm: newWidthMm, ground_first: { gfL, gfW, ffW }, source_note: fp.source_note || null };
+          if (useLength) merged.extra.length_correction = { from_mm: G.lengthMm, to_mm: newLengthMm, ground_first: { gfL, gfW, ffW }, source_note: fp.source_note || null };
           if (ffW && gfW && Math.abs(ffW - gfW) > 150) merged.notes.push(`First-floor width (${ffW}) differs from ground (${gfW}) — likely a bay/projection; ground floor governs the footprint.`);
           console.log(`Dimensions corrected: L ${G.lengthMm}→${newLengthMm}mm, W ${G.widthMm}→${newWidthMm}mm (floor-plan read; GF ${gfL}x${gfW}, FF width ${ffW||'?'})`);
         } else {
@@ -715,6 +730,7 @@ function mergeDocAIResults(results) {
   const overallHeightMm = getNum('overall_height_mm'); // full external wall height from DPC to eaves/ridge
   // Wall height for external wall area: use overall building height if available (most accurate for 2-storey)
   // Otherwise estimate from ceiling heights + floor structure
+  const heightIsFallbackDefault = !overallHeightMm && !ceilGroundMm && !ceilFirstMm;
   const extWallHeightMm = overallHeightMm || 
     (ceilGroundMm && ceilFirstMm ? ceilGroundMm + ceilFirstMm + 300 : // +300mm for floor structure
      ceilGroundMm ? ceilGroundMm : 2400);
@@ -728,10 +744,26 @@ function mergeDocAIResults(results) {
   // the declared storey count (from floor areas) the same way widthSuspect cross-checks
   // against GIFA — plausible eaves height is roughly 4.6-5.8m for 2-storey, 2.3-3.0m for
   // 1-storey; give generous headroom either side before flagging.
-  const storeysForHeight = (firstArea && firstArea > 5) ? 2 : 1;
+  // storeysForHeight: default to 2-storey when the floor split is simply UNKNOWN (firstArea
+  // null), not just when it's small — confirmed on Spaunton, defaulting to 1-storey here
+  // gave a 3300mm threshold that a completely-fallback 2400mm height slipped under
+  // undetected, when the real building is 2-storey with a ~5035mm eaves height. Only
+  // treat it as 1-storey when firstArea is an actual small reading, not an absence of one.
+  const storeysForHeight = (firstArea == null) ? 2 : (firstArea > 5 ? 2 : 1);
   const plausibleMaxEavesMm = storeysForHeight === 2 ? 6300 : 3300;
+  // Minimum bound, symmetric to the max above — confirmed needed on Haselbech, where
+  // DocAI returned 2430mm for a 2-storey house (likely a misread ceiling height or
+  // window dimension, not an eaves reading at all) and the max-only check never caught
+  // it, since 2430 < 6300 looked perfectly plausible on that side alone. A genuine
+  // eaves height is rarely below ~4000mm for 2-storey, ~2000mm for 1-storey.
+  const plausibleMinEavesMm = storeysForHeight === 2 ? 4000 : 2000;
   let heightSuspect = false;
-  if (extWallHeightMm && extWallHeightMm > plausibleMaxEavesMm) heightSuspect = true;
+  if (extWallHeightMm && (extWallHeightMm > plausibleMaxEavesMm || extWallHeightMm < plausibleMinEavesMm)) heightSuspect = true;
+  // A hardcoded fallback is never a real reading — flag it every time, independent of
+  // the plausibility threshold above (which only catches values that look wrong, not
+  // values that were never found in the first place).
+  if (heightIsFallbackDefault) heightSuspect = true;
+
 
 
   const sideRunMm = getNum('side_wall_length_mm') || getNum('gable_wall_length_mm');
@@ -750,7 +782,11 @@ function mergeDocAIResults(results) {
   if (!lengthMm) missing.push('Overall building length — enter manually in Dimensions tab');
   if (!widthMm) missing.push('Overall building width — enter manually in Dimensions tab');
   if (widthSuspect) missing.push('⚠ Building width (' + (widthMm/1000).toFixed(3) + 'm) may be the ROOF SPAN, not the footprint width — it looks too large for the floor area. CONFIRM the side dimension from the substructure/ground-floor plan outer bar and correct in the Dimensions tab before relying on masonry quantities.');
-  if (heightSuspect) missing.push('⚠ Wall height (' + (extWallHeightMm/1000).toFixed(3) + 'm) may be the RIDGE or COPING APEX height, not EAVES — it looks too tall for a ' + storeysForHeight + '-storey building. CONFIRM the eaves height from the elevation and correct in the Dimensions tab before relying on wall/gable/skirting/soffit quantities.');
+  if (heightIsFallbackDefault) missing.push('⚠ No wall height could be read at all (no overall height, no ceiling heights found) — using a generic 2.4m placeholder, which is almost certainly too short for a real eaves line. CONFIRM the actual eaves height from the elevation and enter it in the Dimensions tab before relying on any wall/gable/skirting/soffit quantities — they will be substantially under-read otherwise.');
+  else if (heightSuspect) {
+    const tooTall = extWallHeightMm > plausibleMaxEavesMm;
+    missing.push('⚠ Wall height (' + (extWallHeightMm/1000).toFixed(3) + 'm) looks ' + (tooTall ? 'too tall — may be the RIDGE or COPING APEX height, not EAVES' : 'too short — may be a misread ceiling height or window dimension, not the full EAVES height') + ' for a ' + storeysForHeight + '-storey building. CONFIRM the eaves height from the elevation and correct in the Dimensions tab before relying on wall/gable/skirting/soffit quantities.');
+  }
   if (floorSplitSuspect) missing.push('⚠ Ground/first floor split (' + rawGroundArea + 'm² / ' + rawFirstArea + 'm² read) looks fabricated — this drawing may only show a single combined GIFA total with no per-floor breakdown. Assumed an even 50/50 split (' + groundArea.toFixed(1) + 'm² each) — CONFIRM the actual ground/first areas from the drawing and correct in the Dimensions tab before relying on partition area, skirting, or storey-count-dependent quantities.');
   if (!roofPitch) missing.push('Roof pitch angle — enter manually in Spec & Roof tab');
 
