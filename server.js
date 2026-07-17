@@ -215,7 +215,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.20.1', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '7.21.0', sandbox: SANDBOX_MODE, schedule_engine: SCHEDULE_ENGINE, schedule_model: SCHEDULE_MODEL, docai: !!GOOGLE_SA_KEY }));
 const PROXY_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => fetch(`${PROXY_URL}/health`).catch(() => {}), 10 * 60 * 1000);
 
@@ -535,6 +535,17 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         const gfW = fp && fp.ground_floor_width_mm ? parseFloat(fp.ground_floor_width_mm) : null;
         const gfL = fp && fp.ground_floor_length_mm ? parseFloat(fp.ground_floor_length_mm) : null;
         const ffW = fp && fp.first_floor_width_mm ? parseFloat(fp.first_floor_width_mm) : null;
+        // width_sum_confirmed: the extraction explicitly verified the outer total against
+        // a visible inner sub-segment breakdown that sums to it. This is a genuine internal
+        // consistency check on the READING itself — distinct from, and more reliable than,
+        // the GIFA-ratio safeguard below. Confirmed needed on Haselbech: a real, wider
+        // outer dimension (10615mm, describing a winged footprint's bounding perimeter)
+        // fails the GIFA check in EXACTLY the same way Kingsdale's genuinely wrong
+        // "corrected" reading did (both show "original passes, wide fails" against a
+        // simple-rectangle GIFA ratio) — that test cannot tell them apart. Sum-confirmation
+        // can, because it checks whether the reading is internally self-consistent on the
+        // drawing, not whether it matches an external, unrelated figure.
+        const widthSumConfirmed = !!(fp && fp.width_sum_confirmed === true);
         // accept the floor-plan width only if it is plausible against GIFA (i.e. it is
         // NOT itself the span). Same threshold used to flag it suspect. Length has no
         // GIFA-implied ceiling to check against, so just a basic sanity floor.
@@ -602,7 +613,12 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
             const oldRatio = oldNet ? oldNet / realGifaPerFloor : null;
             const newImplausible = newRatio > 1.35 || newRatio < 0.65;
             const oldWasBetter = oldRatio && oldRatio <= 1.35 && oldRatio >= 0.65;
-            if (newImplausible && oldWasBetter) {
+            if (newImplausible && oldWasBetter && widthSumConfirmed) {
+              console.log(`Wide width ${candWidthMm}mm fails the simple-rectangle GIFA check (ratio ${newRatio.toFixed(2)}) but was sum-confirmed against a visible inner breakdown on the drawing — treating as a genuine notch/wing footprint, not a bad reading. Keeping the wide width for wall perimeter and preserving the narrower original (${G.widthMm}mm) for gable-end calculations.`);
+              merged.floor.gable_width_m = G.widthMm / 1000;
+              merged.notes = merged.notes || [];
+              merged.notes.push(`Building width corrected to ${(candWidthMm/1000).toFixed(3)}m for wall perimeter (sum-confirmed against an inner dimension breakdown on the drawing) — this house has a wing/notch, so the narrower ${(G.widthMm/1000).toFixed(3)}m is kept separately for gable-end area, since that is where the gable walls physically sit.`);
+            } else if (newImplausible && oldWasBetter) {
               console.log(`Rejecting dimension correction — new L${candLengthMm}xW${candWidthMm} implies ${newNet.toFixed(1)}m² net vs real GIFA ${realGifaPerFloor.toFixed(1)}m² (ratio ${newRatio.toFixed(2)}), original reading was more consistent (ratio ${oldRatio.toFixed(2)}). Keeping original dimensions.`);
               useWidth = false;
               useLength = false;
@@ -614,7 +630,11 @@ app.post('/analyse-drawing', upload.array('drawings', 10), async (req, res) => {
         if (useWidth || useLength) {
           const newLengthMm = useLength ? gfL : G.lengthMm;
           const newWidthMm = useWidth ? gfW : G.widthMm;
-          const newGeom = computeWallGeometry({ ...G, lengthMm: newLengthMm, widthMm: newWidthMm });
+          // If the sum-confirmed notch/wing path set a preserved gable width, use it as
+          // sideRunMm so the gable triangle is based on the narrower main-block width
+          // (where the gable walls physically sit), not the wider bounding perimeter.
+          const gableOverrideMm = merged.floor.gable_width_m ? merged.floor.gable_width_m * 1000 : null;
+          const newGeom = computeWallGeometry({ ...G, lengthMm: newLengthMm, widthMm: newWidthMm, gableTriangleBaseMm: gableOverrideMm });
           merged.floor.length_m = newLengthMm ? newLengthMm / 1000 : merged.floor.length_m;
           merged.floor.width_m = newWidthMm ? newWidthMm / 1000 : merged.floor.width_m;
           merged.walls = newGeom.walls;
@@ -951,11 +971,19 @@ function mergeDocAIResults(results) {
 function computeWallGeometry(g) {
   const lengthMm = g.lengthMm, widthMm = g.widthMm, extWallHeightMm = g.extWallHeightMm;
   const pitchDeg = g.pitchDeg || 35;
-  const gableLenMm = g.sideRunMm || widthMm || null; // drawn side dimension, used directly
+  const gableLenMm = g.sideRunMm || widthMm || null; // gable WALL's own rectangle length (unchanged existing behaviour — e.g. DocAI's side_wall_length_mm entity)
   const pitchRad = pitchDeg * Math.PI / 180;
-  const gableBaseMm = gableLenMm || lengthMm || 0;
-  const ridgeHeightMm = (gableBaseMm / 2) * Math.tan(pitchRad);
-  const gableAreaM2 = gableBaseMm ? 2 * 0.5 * (gableBaseMm / 1000) * (ridgeHeightMm / 1000) : 0;
+  // gableTriangleBaseMm: the base of the ROOF GABLE TRIANGLE specifically — distinct from
+  // gableLenMm above, which governs the gable WALL's own rectangle length. These are
+  // normally the same thing, but not for a genuine notch/wing footprint: the wall
+  // rectangle correctly spans the WIDE bounding width (the true wall perimeter, confirmed
+  // on Haselbech via a sum-confirmed nested dimension chain: 10615mm), while the roof
+  // gable itself peaks at the NARROWER main-block width (6565mm) — where the gable walls
+  // physically sit. Falls back to gableLenMm (existing behaviour, unaffected) when not
+  // explicitly provided, so every non-notch case is untouched.
+  const gableTriangleBaseMm = g.gableTriangleBaseMm || gableLenMm || lengthMm || 0;
+  const ridgeHeightMm = (gableTriangleBaseMm / 2) * Math.tan(pitchRad);
+  const gableAreaM2 = gableTriangleBaseMm ? 2 * 0.5 * (gableTriangleBaseMm / 1000) * (ridgeHeightMm / 1000) : 0;
   const walls = (lengthMm && widthMm) ? [
     { label: 'Front wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
     { label: 'Rear wall', length_m: lengthMm / 1000, height_m: extWallHeightMm / 1000, is_external: true },
@@ -982,11 +1010,14 @@ async function readFloorPlanDimensions(files) {
 Rules:
 - The GROUND FLOOR PLAN is the governing footprint: the longest outer dimension = length, the shorter outer dimension = width.
 - Also read the FIRST FLOOR PLAN outer dimensions as a cross-check.
+- Dimension chains are often NESTED — an inner set of lines breaking the elevation into room-by-room or feature-by-feature sub-segments (e.g. "353 / 4908 / 5247 / 353"), sitting alongside a single outer line that runs the FULL, unbroken length or width in one span. You must use ONLY that single outermost, unbroken total — never an inner sub-segment, even if it looks prominent or sits closer to the building.
+- IMPORTANT — if you can see an inner sub-segment breakdown alongside the outer total on the same run, report the individual sub-segment numbers in width_breakdown_mm / length_breakdown_mm (as an array, in order) and check whether they sum to (or come very close to) the outer total you are reporting. Set width_sum_confirmed / length_sum_confirmed to true only if they do. This is a genuine internal consistency check on your own reading, not a guess — leave it false if you only saw the outer total with no visible breakdown, or if the numbers do not actually add up.
+- This matters specifically for L-shaped or winged footprints: the floor plan's true width may be genuinely WIDER than a narrower reading elsewhere (e.g. from DocAI, or from a different dimension on the same sheet) if the building has a wing or setback — the outer total is still correct in that case, it just doesn't describe a simple filled rectangle. Report it as read; do not adjust it to match GIFA or any other figure.
 - NEVER take these from the ROOF PLAN (that is the roof SPAN, not the footprint), the SECTION, or the SUBSTRUCTURE/FOUNDATION plan.
 - Ground and first should normally match; a small difference is usually a bay window — note it.
 - Read exactly as printed, in millimetres. Do not scale or estimate. If genuinely unreadable, use null.
 Return ONLY this JSON, no markdown, no commentary:
-{"ground_floor_length_mm":null,"ground_floor_width_mm":null,"first_floor_length_mm":null,"first_floor_width_mm":null,"source_note":null}` });
+{"ground_floor_length_mm":null,"ground_floor_width_mm":null,"first_floor_length_mm":null,"first_floor_width_mm":null,"width_breakdown_mm":null,"length_breakdown_mm":null,"width_sum_confirmed":false,"length_sum_confirmed":false,"source_note":null}` });
   try {
     const raw = (await anthropicStream({ model: 'claude-sonnet-4-5', max_tokens: 500, messages: [{ role: 'user', content: fileParts }] }))
       .replace(/```json|```/g, '').trim();
